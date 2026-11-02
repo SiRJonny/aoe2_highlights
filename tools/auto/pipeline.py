@@ -17,8 +17,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 LAUNCHER = ROOT / "AoE2Control_1.1.5" / "AoE2Control.exe"
-SETTINGS_OVERRIDE = ROOT / "tools" / "aoe2control" / "settings.villpop.ini"
-MODULE_OVERRIDE = ROOT / "tools" / "aoe2control" / "vill_pop_recorder"
+SETTINGS_OVERRIDE = ROOT / "tools" / "aoe2control" / "settings.timeline.ini"
+MODULE_OVERRIDE = ROOT / "tools" / "aoe2control" / "timeline_recorder"
 REPLAY_SCRIPT = ROOT / "tools" / "auto" / "start_replay.py"
 CLIENT_SCRIPT = ROOT / "tools" / "aoe2control" / "pipe_client.py"
 CONVERTER = ROOT / "tools" / "aoe2control" / "villpop_to_csv.py"
@@ -56,11 +56,19 @@ def inject() -> None:
         sys.exit(f"injection failed, exit {result.returncode}")
 
 
-def wait_for_done(max_seconds: float) -> dict:
-    """Poll the client output jsonl for a `done` row; return merged stats."""
+def wait_for_done(max_seconds: float, stop_after: float = None) -> dict:
+    """Poll the client output jsonl for a `done` row; return merged stats.
+
+    With stop_after set: once a vill_pop/stats sample passes that game time,
+    interrupt the replay via the ESC menu's Quit Current Game."""
+    sys.path.insert(0, str(Path(__file__).parent))
+    import game
+
+    quitKey = None
     deadline = time.time() + max_seconds
     seen = 0
     last_text = 0
+    interrupted = False
     while time.time() < deadline:
         if OUT_JSONL.exists():
             recs = []
@@ -72,24 +80,51 @@ def wait_for_done(max_seconds: float) -> dict:
                 except json.JSONDecodeError:
                     continue
             done = [r for r in recs if r.get("type") == "done"]
-            sample = [r for r in recs if r.get("type") == "vill_pop"]
+            sample = [r for r in recs
+                      if r.get("type") in ("vill_pop", "stats", "bld_event")]
             if done:
                 return {
                     "samples": len(sample),
                     "rows_total": len(recs),
+                    "interrupted": interrupted,
                     "first_time": sample[0].get("time") if sample else None,
                     "last_time": sample[-1].get("time") if sample else None,
                     "last_counts": sample[-1].get("counts") if sample else None,
                 }
+            if sample and sample[-1].get("time") and stop_after is not None \
+               and not interrupted and sample[-1]["time"] >= stop_after:
+                interrupted = True
+                print(f"  t>={stop_after}: quitting game via ESC menu ...")
+                if not game_module_quit():
+                    print("quit anchor not found; continuing to wait "
+                          "(debug shot: out/auto_debug/fail_quit_menu.png)")
             if len(sample) != seen:
                 seen = len(sample)
                 now = time.time()
-                if now - last_text > 60:
+                if now - last_text > 45:
                     last_text = now
                     t = sample[-1].get("time", 0) if sample else 0
-                    print(f"  sampling went on, {seen} samples, game t={t:.0f}s")
+                    print(f"  sampling, {seen} samples, game t={t:.0f}s")
         time.sleep(2)
     sys.exit(f"no `done` row within {max_seconds}s")
+
+
+def game_module_quit(game=None):
+    """ESC -> Quit Current Game anchor click. Returns True when clicked."""
+    import pyautogui
+    if game is None:
+        sys.path.insert(0, str(Path(__file__).parent))
+        import game
+    game.focus_window()
+    pyautogui.press("escape")
+    time.sleep(1.2)
+    hit = game.locate_anchor("quit_current_game", threshold=0.80)
+    if not hit:
+        game.save_debug("fail_quit_menu")
+        return False
+    game.press_click(hit[0], hit[1])
+    time.sleep(3)
+    return True
 
 
 def main():
@@ -97,10 +132,23 @@ def main():
     ap.add_argument("--search", default=None)
     ap.add_argument("--row", type=int, default=1)
     ap.add_argument("--max-minutes", type=float, default=60)
+    ap.add_argument("--stop-after", type=float, default=None,
+                    help="interrupt the replay via ESC + Quit Current Game "
+                         "once a sample passes this game time")
+    ap.add_argument("--force-inject", action="store_true",
+                    help="unload the running CONTROL engine first "
+                         "(module/settings swap)")
     args = ap.parse_args()
 
     OUT_JSONL.unlink(missing_ok=True)
 
+    if args.force_inject:
+        sys.path.insert(0, str(Path(__file__).parent))
+        import game
+        game.focus_window()
+        game.pyautogui.keyDown("delete")
+        game.pyautogui.keyUp("delete")
+        time.sleep(4)
     inject()
 
     print("starting pipe client ...")
@@ -122,7 +170,8 @@ def main():
         sys.exit(f"UI flow failed at step above (see out/auto_debug)")
 
     print("waiting for replay to finish (samples live in out/vill_pop.jsonl)")
-    stats = wait_for_done(max_seconds=args.max_minutes * 60)
+    stats = wait_for_done(max_seconds=args.max_minutes * 60,
+                          stop_after=args.stop_after)
     client.terminate()
     print("done:", json.dumps(stats))
 
