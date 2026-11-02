@@ -41,14 +41,21 @@ def screen_size():
         return m["width"], m["height"]
 
 
+def wait_seek_settled(handle, t0, max_s=300):
+    """Wait until the module acks the seek (or the tick passes t0)."""
+    deadline = time.time() + max_s
+    while time.time() < deadline:
+        for r in drive.read_for(handle, 2, quiet=True):
+            if r.get("action") == "seek_reached":
+                return True
+            if r.get("type") == "tick" and (r.get("t") or 0) >= t0:
+                return True
+        time.sleep(0.2)
+    return False
+
+
 def record(handle, out_path, t1, fps, gui):
     """Record monitor 1 while the module streams ticks until game t1."""
-    rows_left = drive.read_for(handle, 2)
-    reached = any(r.get("action") == "seek_reached" for r in rows_left)
-    if not reached:
-        for r in rows_left[-1:]:
-            print("last row:", json.dumps(r))
-        sys.exit("no seek_reached ack; module did not settle at t0")
 
     game.focus_window()
     time.sleep(0.5)
@@ -114,6 +121,8 @@ def main():
     ap.add_argument("--search", default=None)
     ap.add_argument("--row", type=int, default=1)
     ap.add_argument("--force-inject", action="store_true")
+    ap.add_argument("--resume", action="store_true",
+                    help="reuse a running replay session (skip UI start)")
     args = ap.parse_args()
 
     OUT.mkdir(exist_ok=True)
@@ -125,21 +134,24 @@ def main():
         import pipeline  # noqa: F401  (guarded main)
         pipeline.inject()
 
-    print("starting replay ...")
-    ui_cmd = [sys.executable, str(HERE / "start_replay.py")]
-    if args.search:
-        ui_cmd += ["--search", args.search]
-    ui_cmd += ["--row", str(args.row)]
-    ui = subprocess.run(ui_cmd, capture_output=True, text=True,
-                        encoding="utf-8", errors="replace")
-    print(ui.stdout.strip())
-    if ui.returncode != 0:
-        sys.exit("UI flow failed (see out/auto_debug)")
+    if not args.resume:
+        print("starting replay ...")
+        ui_cmd = [sys.executable, str(HERE / "start_replay.py")]
+        if args.search:
+            ui_cmd += ["--search", args.search]
+        ui_cmd += ["--row", str(args.row)]
+        ui = subprocess.run(ui_cmd, capture_output=True, text=True,
+                            encoding="utf-8", errors="replace")
+        print(ui.stdout.strip())
+        if ui.returncode != 0:
+            sys.exit("UI flow failed (see out/auto_debug)")
 
     time.sleep(4)
     handle = drive.connect(120)
     drive.send(handle, {"action": "seek", "t": args.t0, "x": args.x,
                         "y": args.y, "pause": True, "camera": True})
+    if not wait_seek_settled(handle, args.t0):
+        sys.exit("module did not settle at t0")
     record(handle, name, args.t1, args.fps, not args.no_gui)
 
 
