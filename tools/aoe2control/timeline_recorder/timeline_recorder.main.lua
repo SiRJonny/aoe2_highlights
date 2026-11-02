@@ -142,15 +142,31 @@ local function completedTypeOf(unitType)
     return nil
 end
 
-local function buildingAtSameTile(f)
+local function buildingAtSameTile(f, p)
+    -- Player:GetTownCenters() fallback: works whatever type id the
+    -- completed town center registers under
+    local ok, list = pcall(function() return p:GetTownCenters() end)
+    if ok and list then
+        local states = GetObjectStates(list)
+        if states and states.id then
+            for j = 1, #states.id do
+                if states.playerId[j] == f.playerId
+                    and math.abs(states.x[j] - f.x) <= 3
+                    and math.abs(states.y[j] - f.y) <= 3 then
+                    return true
+                end
+            end
+        end
+    end
+    -- generic completed-type match by name mapping
     local ct = completedTypeOf(f.unitType)
     if not ct then
         return false
     end
-    local ok, states = pcall(function()
+    local ok2, states = pcall(function()
         return GetObjectStates(GetObjectsByType(ct))
     end)
-    if not ok or not states then
+    if not ok2 or not states then
         return false
     end
     for j = 1, #states.id do
@@ -298,7 +314,7 @@ local function trackBuildings()
     for id, f in pairs(foundations) do
         if not seen[id] then
             local obj = GetObjectById(id)
-            if obj or buildingAtSameTile(f) then
+            if obj or buildingAtSameTile(f, GetPlayerById(f.playerId)) then
                 send("bld_event", {
                     event = "done",
                     isHouse = isHouseType(f.unitType),

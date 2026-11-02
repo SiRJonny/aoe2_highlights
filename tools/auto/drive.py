@@ -47,7 +47,7 @@ def send(handle, payload, target_module="timeline_recorder"):
     win32file.WriteFile(handle, json.dumps(msg).encode("utf-8"))
 
 
-def read_for(handle, timeout_s, out=()):
+def read_for(handle, timeout_s, quiet=False):
     """Read rows for up to timeout_s without blocking past the deadline.
 
     PeekNamedPipe first: ReadFile itself would block indefinitely when no
@@ -86,8 +86,9 @@ def read_for(handle, timeout_s, out=()):
                 payload.setdefault("module", env.get("source", {}).get(
                     "settingsGroup"))
                 rows.append(payload)
-                print(json.dumps(payload))
-                sys.stdout.flush()
+                if not quiet:
+                    print(json.dumps(payload))
+                    sys.stdout.flush()
     return rows
 
 
