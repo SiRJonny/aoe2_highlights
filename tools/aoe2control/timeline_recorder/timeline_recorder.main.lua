@@ -166,6 +166,39 @@ local function runSeek()
     end
 end
 
+-- A completed building re-registers under its own unit type (GetObjectById
+-- on the foundation id returns nil then, e.g. for town centers); find an
+-- owner+tile match of the completed type instead. "_FOUNDATION" suffix
+-- mapping: TOWN_CENTER_FOUNDATION -> TOWN_CENTER.
+local function completedTypeOf(unitType)
+    local n = typeNames[unitType]
+    if n and string.sub(n, -11) == "_FOUNDATION" then
+        return UnitObjectType[string.sub(n, 1, #n - 11)]
+    end
+    return nil
+end
+
+local function buildingAtSameTile(f)
+    local ct = completedTypeOf(f.unitType)
+    if not ct then
+        return false
+    end
+    local ok, states = pcall(function()
+        return GetObjectStates(GetObjectsByType(ct))
+    end)
+    if not ok or not states then
+        return false
+    end
+    for j = 1, #states.id do
+        if states.playerId[j] == f.playerId
+            and math.abs(states.x[j] - f.x) <= 2
+            and math.abs(states.y[j] - f.y) <= 2 then
+            return true
+        end
+    end
+    return false
+end
+
 local function trackBuildings()
     local seen = {}
     local count = GetPlayerCount()
@@ -199,11 +232,12 @@ local function trackBuildings()
         end
     end
 
-    -- disappeared foundations: finished (object still exists) or lost
+    -- disappeared foundations: finished (object still exists, or the
+    -- completed building sits on the tile under its own unit type) or lost
     for id, f in pairs(foundations) do
         if not seen[id] then
             local obj = GetObjectById(id)
-            if obj then
+            if obj or buildingAtSameTile(f) then
                 send("bld_event", {
                     event = "done",
                     isHouse = isHouseType(f.unitType),
