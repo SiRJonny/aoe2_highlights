@@ -1,0 +1,10 @@
+# regenerable run artifacts
+out/
+
+# third-party binaries (download AoE2Control 1.1.5 from
+# https://github.com/aoe2control/AoE2Control/releases)
+AoE2Control_1.1.5.zip
+AoE2Control_1.1.5/
+
+__pycache__/
+*.pyc

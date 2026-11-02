@@ -1,0 +1,119 @@
+diff --git a/mgz/fast/header.py b/mgz/fast/header.py
+index 707426b..b61a0ab 100644
+--- a/mgz/fast/header.py
++++ b/mgz/fast/header.py
+@@ -470,6 +470,8 @@ def parse_de(data, version, save, skip=False):
+             handicap = struct.unpack_from('<I', handicap_data, 4)[0]
+         if save >= 64.3:
+             data.read(4)
++        if save >= 67.2:
++            de_string(data)
+ 
+         players.append(dict(
+             number=number,
+@@ -707,6 +709,10 @@ def parse_players(header, num_players, version, save):
+ 
+ def parse_metadata(header, save, skip_ai=True):
+     """Parse recorded game metadata."""
++    if save >= 67.2:
++        # Two words were inserted ahead of the ai count, the first a
++        # timestamp. Reading it as the count makes it always non-zero.
++        header.read(8)
+     ai = unpack('<I', header)
+ 
+     if ai > 0:
+diff --git a/mgz/header/ai.py b/mgz/header/ai.py
+index 1a4591a..309b432 100644
+--- a/mgz/header/ai.py
++++ b/mgz/header/ai.py
+@@ -1,7 +1,7 @@
+ """AI."""
+ 
+ from mgz import Version
+-from mgz.util import Find
++from mgz.util import Find, find_save_version
+ from construct import (Array, Byte, If, Int16ul, Int32sl, Int32ul, Padding,
+                        PascalString, Struct, this, IfThenElse)
+ 
+@@ -28,6 +28,9 @@
+ )
+ 
+ ai = "ai"/Struct(
++    # 67.2 inserted two words ahead of this field, the first a timestamp.
++    # Without skipping them `has_ai` reads that timestamp instead.
++    If(lambda ctx: find_save_version(ctx) >= 67.2, Padding(8)),
+     "has_ai"/Int32ul, # if true, parse AI
+     "yep"/If(
+         this.has_ai == 1,
+diff --git a/mgz/header/de.py b/mgz/header/de.py
+index e70e9e5..31294b6 100644
+--- a/mgz/header/de.py
++++ b/mgz/header/de.py
+@@ -45,6 +45,7 @@
+     "custom_ai"/Flag,
+     If(lambda ctx: find_save_version(ctx) >= 25.06, "handicap"/Bytes(8)),
+     If(lambda ctx: find_save_version(ctx) >= 64.3, "unknown_de_64_3" / Int32ul),
++    If(lambda ctx: find_save_version(ctx) >= 67.2, "unknown_de_67_2" / de_string),
+ )
+ 
+ string_block = Struct(
+diff --git a/tests/recs/de-68.0-no-opponent.aoe2record b/tests/recs/de-68.0-no-opponent.aoe2record
+new file mode 100644
+index 0000000..af148fd
+Binary files /dev/null and b/tests/recs/de-68.0-no-opponent.aoe2record differ
+diff --git a/tests/recs/de-68.0.aoe2record b/tests/recs/de-68.0.aoe2record
+new file mode 100644
+index 0000000..3bb3376
+Binary files /dev/null and b/tests/recs/de-68.0.aoe2record differ
+diff --git a/tests/test_files.py b/tests/test_files.py
+index cff4c98..9204f3c 100644
+--- a/tests/test_files.py
++++ b/tests/test_files.py
+@@ -1,6 +1,7 @@
+ import glob
+ import unittest
+ from mgz import header, body, fast
++import mgz.fast.header
+ from mgz.summary import ModelSummary, FullSummary
+ 
+ 
+@@ -32,13 +33,38 @@ def parse_file_summary(path, summary_class):
+ 
+ class TestFiles(unittest.TestCase):
+ 
++    def test_save_version_67_2_players(self):
++        """67.2 changed the player record and the metadata section.
++
++        de-68.0-no-opponent is the case that fails differently: with no AI
++        in the game there is no AI data block, and the field that says so is
++        no longer where the parser looked, so the forward scan for the end of
++        that block used to overshoot and every subsequent field was garbage.
++        """
++        for name, expected in (
++                ('de-68.0', 3),
++                ('de-68.0-no-opponent', 2),
++        ):
++            with open(f'tests/recs/{name}.aoe2record', 'rb') as handle:
++                parsed = fast.header.parse(handle)
++            self.assertEqual(len(parsed['players']), expected, name)
++
+     def test_files_full(self):
+         parse_file_full('tests/recs/small.mgz')
+         parse_file_full('tests/recs/de-13.07.aoe2record')
+ 
+     def test_files_fast(self):
+         # these files aren't supported by full header parser for now:
+-        skip = {"tests/recs/de-50.6-scenario.aoe2record", "tests/recs/de-50.6-scenario-with-triggers.aoe2record"}
++        skip = {
++            "tests/recs/de-50.6-scenario.aoe2record",
++            "tests/recs/de-50.6-scenario-with-triggers.aoe2record",
++            # Save version 67.2 moved something inside `initial` as well.
++            # The fast parser reads these fully; the construct header still
++            # runs off the end of the stream, and I did not want to guess at
++            # a layout I could not measure.
++            "tests/recs/de-68.0.aoe2record",
++            "tests/recs/de-68.0-no-opponent.aoe2record",
++        }
+ 
+         for path in glob.glob('tests/recs/*'):
+             if path.replace("\\", "/") in skip:
