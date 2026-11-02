@@ -110,20 +110,23 @@ def wait_for_done(max_seconds: float, stop_after: float = None) -> dict:
 
 
 def game_module_quit(game=None):
-    """ESC -> Quit Current Game anchor click. Returns True when clicked."""
-    import pyautogui
+    """ESC -> Quit Current Game -> confirm Yes. Returns True when clicked."""
     if game is None:
         sys.path.insert(0, str(Path(__file__).parent))
         import game
     game.focus_window()
-    pyautogui.press("escape")
+    game.pyautogui.press("escape")
     time.sleep(1.2)
     hit = game.locate_anchor("quit_current_game", threshold=0.80)
     if not hit:
         game.save_debug("fail_quit_menu")
         return False
     game.press_click(hit[0], hit[1])
-    time.sleep(3)
+    time.sleep(1.5)
+    yes = game.locate_anchor("quit_confirm_yes", threshold=0.80)
+    if yes:
+        game.press_click(yes[0], yes[1])
+        time.sleep(2)
     return True
 
 

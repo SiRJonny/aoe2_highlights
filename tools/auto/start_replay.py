@@ -31,9 +31,24 @@ def step(label, fn, *a, **kw):
 
 
 def click_single_player():
-    if game.locate_anchor("single_player_clicked") is not None:
-        return True  # dialog already open
-    return game.click_anchor("single_player_button", pause=1.2)
+    for attempt in range(2):
+        if game.locate_anchor("single_player_clicked") is not None:
+            return True
+        if game.locate_anchor("single_player_button") is not None:
+            return game.click_anchor("single_player_button", pause=1.2)
+        if attempt == 0:
+            # no main menu anchors -> we may be inside a session (postgame
+            # map view). Escape opens the in-match menu with Quit Current Game;
+            # on the real main menu Escape is inert.
+            game.focus_window()
+            game.pyautogui.press("escape")
+            time.sleep(1.2)
+            hit = game.locate_anchor("quit_current_game", threshold=0.80)
+            if hit:
+                game.press_click(hit[0], hit[1])
+                time.sleep(3)
+                continue
+    return False
 
 
 def navigate_to_replays():
@@ -113,6 +128,16 @@ def leave_replay_end_screen():
     time.sleep(3)
 
 
+def close_open_menus():
+    """Close the in-match Main Menu (Escape does not close it): Cancel."""
+    if game.locate_anchor("match_menu_cancel", threshold=0.80) is not None:
+        hit = game.locate_anchor("match_menu_cancel", threshold=0.80)
+        game.press_click(hit[0], hit[1])
+        time.sleep(1.0)
+        return True
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--search", default=None, help="typed into the replay search box")
@@ -122,28 +147,48 @@ def main():
     game.focus_window()
     time.sleep(0.5)
 
-    if game.locate_anchor("return_to_replays_button") is not None:
-        print("postgame statistics -> return to replays")
-        hit = game.locate_anchor("return_to_replays_button")
-        game.focus_window()
-        time.sleep(0.3)
-        game.press_click(hit[0], hit[1])
-        time.sleep(2)
-    elif game.locate_anchor("leave_map_button") is not None:
-        print("replay finished screen -> leaving to main menu")
-        step("leave_map", leave_replay_end_screen)
-    else:
-        game.pyautogui.press("escape")
-        time.sleep(1.0)
-
-    if game.hit_anchor("load_replay_header"):
-        print("replays tab already active")
-        print("replays tab already active")
-    elif game.hit_anchor("load_sp_header"):
-        print("load-game screen already open")
-        switch_to_replay_tab()
-    else:
-        navigate_to_replays()
+    # State machine to reach the replay list from anywhere.
+    for state in range(12):
+        if game.hit_anchor("load_replay_header"):
+            print("at replay list")
+            break
+        elif game.locate_anchor("return_to_replays_button") is not None:
+            hit = game.locate_anchor("return_to_replays_button")
+            print("statistics -> return to replays")
+            game.focus_window(); time.sleep(0.3)
+            game.press_click(hit[0], hit[1]); time.sleep(2)
+        elif game.locate_anchor("leave_map_button") is not None:
+            print("finished replaying -> leave map")
+            hit = game.locate_anchor("leave_map_button")
+            game.focus_window(); time.sleep(0.3)
+            game.press_click(hit[0], hit[1]); time.sleep(3)
+        elif game.locate_anchor("quit_confirm_dialog", threshold=0.80) is not None:
+            hit = game.locate_anchor("quit_confirm_yes", threshold=0.80)
+            print("quit confirm -> yes")
+            game.focus_window(); time.sleep(0.3)
+            game.press_click(hit[0], hit[1]); time.sleep(3)
+        elif game.locate_anchor("quit_current_game", threshold=0.80) is not None:
+            hit = game.locate_anchor("quit_current_game", threshold=0.80)
+            print("match menu open -> quit current game")
+            game.focus_window(); time.sleep(0.3)
+            game.press_click(hit[0], hit[1]); time.sleep(2)
+        elif game.hit_anchor("load_sp_header"):
+            print("saved-games screen -> replays tab")
+            step("replays_tab", game.click_anchor, "replays_button", pause=1.5)
+        elif game.locate_anchor("single_player_button") is not None:
+            navigate_to_replays()
+        elif game.locate_anchor("match_menu_cancel", threshold=0.80) is not None:
+            hit = game.locate_anchor("match_menu_cancel", threshold=0.80)
+            print("match menu open -> cancel")
+            game.focus_window(); time.sleep(0.3)
+            game.press_click(hit[0], hit[1]); time.sleep(1)
+        else:
+            # possibly a live session (postgame map view): Escape opens its
+            # menu; on the real main menu Escape is inert
+            print("unknown state -> escape")
+            game.focus_window()
+            game.pyautogui.press("escape")
+            time.sleep(1.5)
 
     if args.search:
         print(f"search '{args.search}'")
