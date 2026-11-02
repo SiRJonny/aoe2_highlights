@@ -56,15 +56,18 @@ def inject() -> None:
         sys.exit(f"injection failed, exit {result.returncode}")
 
 
-def wait_for_done(max_seconds: float, stop_after: float = None) -> dict:
+def wait_for_done(max_seconds: float, stop_after: float = None,
+                  skip_lines: int = 0) -> dict:
     """Poll the client output jsonl for a `done` row; return merged stats.
 
-    With stop_after set: once a vill_pop/stats sample passes that game time,
-    interrupt the replay via the ESC menu's Quit Current Game."""
+    skip_lines: number of leading lines that belong to an earlier session
+    (a stale `done` from the previous match must not finish the wait).
+
+    With stop_after set: once a sample passes that game time, interrupt the
+    replay via the ESC menu's Quit Current Game."""
     sys.path.insert(0, str(Path(__file__).parent))
     import game
 
-    quitKey = None
     deadline = time.time() + max_seconds
     seen = 0
     last_text = 0
@@ -72,8 +75,9 @@ def wait_for_done(max_seconds: float, stop_after: float = None) -> dict:
     while time.time() < deadline:
         if OUT_JSONL.exists():
             recs = []
-            for line in OUT_JSONL.read_text(encoding="utf-8").splitlines():
-                if not line.strip():
+            for i, line in enumerate(OUT_JSONL.read_text(
+                    encoding="utf-8").splitlines()):
+                if not line.strip() or i < skip_lines:
                     continue
                 try:
                     recs.append(json.loads(line))
@@ -172,9 +176,17 @@ def main():
         client.terminate()
         sys.exit(f"UI flow failed at step above (see out/auto_debug)")
 
+    # rows already in the file belong to the session that was just left:
+    # a stale `done` from it must not end the wait
+    skip_lines = 0
+    if OUT_JSONL.exists():
+        skip_lines = sum(1 for l in OUT_JSONL.read_text(
+            encoding="utf-8").splitlines() if l.strip())
+    print(f"waiting for the new replay ({skip_lines} preceding rows ignored)")
+
     print("waiting for replay to finish (samples live in out/vill_pop.jsonl)")
     stats = wait_for_done(max_seconds=args.max_minutes * 60,
-                          stop_after=args.stop_after)
+                          stop_after=args.stop_after, skip_lines=skip_lines)
     client.terminate()
     print("done:", json.dumps(stats))
 

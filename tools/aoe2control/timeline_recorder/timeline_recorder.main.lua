@@ -39,6 +39,7 @@ local metaSent = false
 local tickCounter = 0
 
 local houseTypes = {}     -- [unitType id] = true, built from UnitObjectType names
+local typeNames = {}      -- [unitType id] = name, filled with house ids at load
 local foundations = {}    -- [objectId] = {unitType, playerId, x, y, hp}
 local seek = nil          -- {"t": number, "x": number, "y": number,
                           --  "pause": bool, "camera": bool}
@@ -50,8 +51,11 @@ end
 local function buildHouseTypeSet()
     local name, value
     for name, value in pairs(UnitObjectType) do
-        if type(value) == "number" and string.sub(name, 1, 5) == "HOUSE" then
-            houseTypes[value] = true
+        if type(value) == "number" then
+            typeNames[value] = name
+            if string.sub(name, 1, 5) == "HOUSE" then
+                houseTypes[value] = true
+            end
         end
     end
 end
@@ -188,6 +192,7 @@ local function trackBuildings()
             send("bld_event", {
                 event = "start",
                 isHouse = isHouseType(f.unitType),
+                name = typeNames[f.unitType],
                 id = id, unitType = f.unitType, owner = f.playerId,
                 x = f.x, y = f.y, hp = f.hp,
             })
@@ -202,6 +207,7 @@ local function trackBuildings()
                 send("bld_event", {
                     event = "done",
                     isHouse = isHouseType(f.unitType),
+                    name = typeNames[f.unitType],
                     id = id, unitType = f.unitType, owner = f.playerId,
                     x = f.x, y = f.y,
                 })
@@ -209,6 +215,7 @@ local function trackBuildings()
                 send("bld_event", {
                     event = "lost",
                     isHouse = isHouseType(f.unitType),
+                    name = typeNames[f.unitType],
                     id = id, unitType = f.unitType, owner = f.playerId,
                     x = f.x, y = f.y,
                 })
