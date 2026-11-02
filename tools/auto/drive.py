@@ -94,11 +94,14 @@ def read_for(handle, timeout_s, out=()):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("action", choices=[
-        "ping", "seek", "camera", "pause", "unpause", "speed", "watch"])
+        "ping", "seek", "camera", "pause", "unpause", "speed", "watch",
+        "probe"])
     ap.add_argument("--t", type=float, default=None)
     ap.add_argument("--x", type=float, default=None)
     ap.add_argument("--y", type=float, default=None)
     ap.add_argument("--v", type=float, default=None)
+    ap.add_argument("--unit-type", type=float, default=None,
+                    help="probe: UnitObjectType id to inspect")
     ap.add_argument("--seconds", type=float, default=30,
                     help="watch: seconds to stream")
     args = ap.parse_args()
@@ -113,6 +116,7 @@ def main():
     send(handle, {
         "action": args.action,
         "t": args.t, "x": args.x, "y": args.y, "v": args.v,
+        "unitType": args.unit_type,
     })
 
     # read the ack (and whatever comes meanwhile)

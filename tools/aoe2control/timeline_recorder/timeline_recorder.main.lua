@@ -107,42 +107,6 @@ function Init()
         .. countHouseTypes() .. " house types known")
 end
 
-local function handleCommands()
-    local msgs = IPC.GetMessages()
-    if #msgs == 0 then
-        return
-    end
-    for i = 1, #msgs do
-        local msg = ParseJSON(msgs[i])
-        local action = msg and msg.action
-        if action == "seek" then
-            seek = {
-                t = tonumber(msg.t) or 0,
-                x = tonumber(msg.x) or 0,
-                y = tonumber(msg.y) or 0,
-                pause = msg.pause ~= false,
-                camera = msg.camera ~= false,
-            }
-        elseif action == "camera" and msg.x then
-            SetCameraPosition(Vector2(msg.x, msg.y))
-            send("ack", { action = action })
-        elseif action == "pause" then
-            SetGamePaused(true)
-            send("ack", { action = action })
-        elseif action == "unpause" then
-            SetGamePaused(false)
-            send("ack", { action = action })
-        elseif action == "set_speed" then
-            SetReplaySpeed(msg.v or ReplaySpeed.FASTEST)
-            send("ack", { action = action })
-        elseif action == "restart" then
-            DispatchRestartGame()
-        elseif action == "ping" then
-            send("pong", { })
-        end
-    end
-end
-
 local function runSeek()
     if not seek then
         return
@@ -197,6 +161,103 @@ local function buildingAtSameTile(f)
         end
     end
     return false
+end
+
+local function handleCommands()
+    local msgs = IPC.GetMessages()
+    if #msgs == 0 then
+        return
+    end
+    for i = 1, #msgs do
+        local msg = ParseJSON(msgs[i])
+        local action = msg and msg.action
+        if action == "seek" then
+            seek = {
+                t = tonumber(msg.t) or 0,
+                x = tonumber(msg.x) or 0,
+                y = tonumber(msg.y) or 0,
+                pause = msg.pause ~= false,
+                camera = msg.camera ~= false,
+            }
+        elseif action == "camera" and msg.x then
+            SetCameraPosition(Vector2(msg.x, msg.y))
+            send("ack", { action = action })
+        elseif action == "pause" then
+            SetGamePaused(true)
+            send("ack", { action = action })
+        elseif action == "unpause" then
+            SetGamePaused(false)
+            send("ack", { action = action })
+        elseif action == "set_speed" then
+            SetReplaySpeed(msg.v or ReplaySpeed.FASTEST)
+            send("ack", { action = action })
+        elseif action == "restart" then
+            DispatchRestartGame()
+        elseif action == "probe" then
+            local body = { action = "probe" }
+            local ok, err = pcall(function()
+                local pt = tonumber(msg.unitType)
+                body.probeType = pt
+                body.name = pt and typeNames[pt]
+                local nm = body.name or (pt and tostring(pt))
+                body.completedType = pt and completedTypeOf(pt)
+                -- list objects by the foundation type ...
+                local ok2, st = pcall(function()
+                    return GetObjectStates(GetObjectsByType(pt))
+                end)
+                if ok2 and st and st.id and #st.id > 0 then
+                    body.byType = { count = #st.id }
+                    local sample = {}
+                    for j = 1, math.min(#st.id, 8) do
+                        table.insert(sample, { id = st.id[j],
+                            owner = st.playerId[j],
+                            x = st.x[j], y = st.y[j] })
+                    end
+                    body.byType.sample = sample
+                else
+                    body.byType = { error = ok2 and "empty" or "nil" }
+                end
+                -- ... and by the likely completed type
+                local ct = pt and completedTypeOf(pt)
+                if ct then
+                    local ok3, st3 = pcall(function()
+                        return GetObjectStates(GetObjectsByType(ct))
+                    end)
+                    if ok3 and st3 and st3.id and #st3.id > 0 then
+                        body.byCompleted = { count = #st3.id,
+                            typeName = typeNames[ct] }
+                        local s3 = {}
+                        for j = 1, math.min(#st3.id, 8) do
+                            table.insert(s3, { id = st3.id[j],
+                                owner = st3.playerId[j],
+                                x = st3.x[j], y = st3.y[j] })
+                        end
+                        body.byCompleted.sample = s3
+                    else
+                        body.byCompleted = { typeName = typeNames[ct],
+                            error = ok3 and "empty" or "nil" }
+                    end
+                end
+                -- UnitObjectType enum names that could be TC-like
+                local hints = {}
+                for hName, _ in pairs(UnitObjectType) do
+                    if string.find(string.upper(hName), "TOWN") then
+                        table.insert(hints, hName)
+                    end
+                end
+                table.sort(hints)
+                body.townHints = hints
+                body.label = nm
+            end)
+            body.ok = ok
+            if not ok then
+                body.error = tostring(err)
+            end
+            send("probe_result", body)
+        elseif action == "ping" then
+            send("pong", { })
+        end
+    end
 end
 
 local function trackBuildings()
