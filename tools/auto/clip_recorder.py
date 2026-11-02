@@ -66,11 +66,12 @@ def record(handle, out_path, t1, fps, gui):
         game.pyautogui.keyUp("shift")
         time.sleep(0.8)
 
-    # normal replay speed, then run
+    # normal replay speed (module set), then unpause via F3: a module
+    # command cannot unpause because the module only runs while unpaused
     drive.send(handle, {"action": "set_speed", "v": None})
-    drive.read_for(handle, 1)
-    drive.send(handle, {"action": "unpause"})
-    drive.read_for(handle, 2)
+    drive.read_for(handle, 1, quiet=True)
+    game.pyautogui.press("f3")
+    time.sleep(1)
 
     t0_time = None
     for r in drive.read_for(handle, 2):
@@ -89,6 +90,8 @@ def record(handle, out_path, t1, fps, gui):
     time.sleep(0.4)
     frames = 0
     t_cur = t0_time or 0
+    last_tick_at = time.time()
+    unpause_retried = False
     frame_interval = 1.0 / fps
     next_frame = time.time()
     with mss.mss() as sct:
@@ -96,7 +99,21 @@ def record(handle, out_path, t1, fps, gui):
         while t_cur < t1:
             for r in drive.read_now(handle):
                 if r.get("type") == "tick" and r.get("t"):
+                    if r["t"] != t_cur:
+                        last_tick_at = time.time()
                     t_cur = r["t"]
+            if time.time() - last_tick_at > 8:
+                if not unpause_retried:
+                    # module never started steaming: game is still paused
+                    game.focus_window()
+                    game.pyautogui.press("f3")
+                    unpause_retried = True
+                    time.sleep(1)
+                    last_tick_at = time.time()
+                else:
+                    print(f"STALL: no ticks for 16 s, aborting at t={t_cur}"
+                          f" ({frames} frames recorded)")
+                    break
             next_frame += frame_interval
             img = np.array(sct.grab(mon))
             writer.write(cv2.cvtColor(img, cv2.COLOR_BGRA2BGR))
@@ -105,6 +122,10 @@ def record(handle, out_path, t1, fps, gui):
             if sleep > 0:
                 time.sleep(sleep)
     writer.release()
+    # leave the replay paused behind us
+    game.focus_window()
+    time.sleep(0.3)
+    game.pyautogui.press("f3")
     print(f"recorded frames={frames}")
 
 
@@ -150,8 +171,19 @@ def main():
     handle = drive.connect(120)
     drive.send(handle, {"action": "seek", "t": args.t0, "x": args.x,
                         "y": args.y, "pause": True, "camera": True})
-    if not wait_seek_settled(handle, args.t0):
-        sys.exit("module did not settle at t0")
+    # a running module answers rows; a paused/static one answers nothing at
+    # all -- on --resume we trust the earlier settle (rows stopped flowing)
+    settled = True
+    if not args.resume:
+        for _ in range(3):
+            if drive.read_now(handle):
+                settled = None
+                break
+            time.sleep(0.5)
+        if settled is None:
+            settled = wait_seek_settled(handle, args.t0)
+    if not settled:
+        sys.exit("module did not settle at t0 (and no module output seen)")
     record(handle, name, args.t1, args.fps, not args.no_gui)
 
 
