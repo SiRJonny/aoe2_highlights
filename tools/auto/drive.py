@@ -47,13 +47,56 @@ def send(handle, payload, target_module="timeline_recorder"):
     win32file.WriteFile(handle, json.dumps(msg).encode("utf-8"))
 
 
+def _parse_chunk(chunk, rows, quiet):
+    for line in chunk.decode("utf-8", errors="replace").splitlines():
+        if not line.strip():
+            continue
+        try:
+            env = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        payload = env.get("payload", env)
+        if isinstance(payload, dict):
+            payload.setdefault("module", env.get("source", {}).get(
+                "settingsGroup"))
+            rows.append(payload)
+            if not quiet:
+                print(json.dumps(payload))
+                sys.stdout.flush()
+
+
+def read_now(handle):
+    """Drain whatever is pending on the pipe, without waiting."""
+    rows = []
+    while True:
+        try:
+            _state, _total, avail = win32pipe.PeekNamedPipe(handle, 0)
+        except pywintypes.error as exc:
+            if exc.winerror in (109, 233):   # pipe broken/closed
+                return rows
+            raise
+        if avail == 0:
+            return rows
+        try:
+            result, data = win32file.ReadFile(handle, 65536)
+            chunk = data
+            while result != 0:
+                result, more = win32file.ReadFile(handle, 65536)
+                chunk += more
+        except pywintypes.error as exc:
+            if exc.winerror in (109, 232, 233):
+                return rows
+            raise
+        _parse_chunk(chunk, rows, quiet=True)
+
+
 def read_for(handle, timeout_s, quiet=False):
     """Read rows for up to timeout_s without blocking past the deadline.
 
     PeekNamedPipe first: ReadFile itself would block indefinitely when no
     message is pending (the old hang)."""
     deadline = time.time() + timeout_s
-    rows = list(out)
+    rows = []
     while time.time() < deadline:
         try:
             state, total, avail = win32pipe.PeekNamedPipe(handle, 0)
@@ -74,21 +117,7 @@ def read_for(handle, timeout_s, quiet=False):
             if exc.winerror in (109, 232, 233):
                 break
             raise
-        for line in chunk.decode("utf-8", errors="replace").splitlines():
-            if not line.strip():
-                continue
-            try:
-                env = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            payload = env.get("payload", env)
-            if isinstance(payload, dict):
-                payload.setdefault("module", env.get("source", {}).get(
-                    "settingsGroup"))
-                rows.append(payload)
-                if not quiet:
-                    print(json.dumps(payload))
-                    sys.stdout.flush()
+        _parse_chunk(chunk, rows, quiet)
     return rows
 
 

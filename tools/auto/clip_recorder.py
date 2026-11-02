@@ -80,7 +80,6 @@ def record(handle, out_path, t1, fps, gui):
 
     game.focus_window()
     time.sleep(0.4)
-    writer.write(game.dump_screen())  # wait, dump_screen is mss grab
     frames = 0
     t_cur = t0_time or 0
     frame_interval = 1.0 / fps
@@ -88,8 +87,7 @@ def record(handle, out_path, t1, fps, gui):
     with mss.mss() as sct:
         mon = sct.monitors[1]
         while t_cur < t1:
-            rows = drive.peek_rows(handle, 1.0)
-            for r in rows:
+            for r in drive.read_now(handle):
                 if r.get("type") == "tick" and r.get("t"):
                     t_cur = r["t"]
             next_frame += frame_interval
@@ -100,7 +98,7 @@ def record(handle, out_path, t1, fps, gui):
             if sleep > 0:
                 time.sleep(sleep)
     writer.release()
-    print(f"recorded {frames} frames, game t={t_cur:.1f}")
+    print(f"recorded frames={frames}")
 
 
 def main():

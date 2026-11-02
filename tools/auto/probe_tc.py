@@ -34,6 +34,10 @@ def run(label, script, *a):
 def main():
     if "--inject" in sys.argv:
         print("== injecting CONTROL (module swap)")
+        game.focus_window()
+        game.pyautogui.keyDown("delete")
+        game.pyautogui.keyUp("delete")
+        time.sleep(4)
         import pipeline  # noqa: F401  (guarded main)
         pipeline.inject()
         time.sleep(4)

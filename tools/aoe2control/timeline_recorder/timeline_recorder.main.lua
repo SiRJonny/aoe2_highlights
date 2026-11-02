@@ -205,7 +205,7 @@ local function handleCommands()
             SetGamePaused(false)
             send("ack", { action = action })
         elseif action == "set_speed" then
-            SetReplaySpeed(msg.v or ReplaySpeed.FASTEST)
+            SetReplaySpeed(msg.v or ReplaySpeed.NORMAL)
             send("ack", { action = action })
         elseif action == "restart" then
             DispatchRestartGame()
