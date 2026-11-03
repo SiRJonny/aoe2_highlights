@@ -23,6 +23,7 @@ Usage:
 """
 import argparse
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -168,13 +169,18 @@ def mux(video_path, wav_path, out_path):
     if FFMPEG is None:
         import imageio_ffmpeg
         FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
+    tmp = out_path.with_suffix(".merged.mp4")
     cmd = [FFMPEG, "-y", "-i", str(video_path), "-i", str(wav_path),
-           "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", str(out_path)]
-    subprocess.run(cmd, capture_output=True)
-    if out_path.exists() and out_path.stat().st_size > 0:
-        video_path.unlink(missing_ok=True)
+           "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", str(tmp)]
+    proc = subprocess.run(cmd, capture_output=True)
+    if tmp.exists() and tmp.stat().st_size > 0:
+        os.replace(tmp, out_path)
         wav_path.unlink(missing_ok=True)
+        if video_path != out_path:
+            video_path.unlink(missing_ok=True)
         return True
+    if proc.returncode != 0:
+        log(f"mux stderr: {proc.stderr.decode('utf-8', 'replace')[-400:]}")
     return False
 
 
