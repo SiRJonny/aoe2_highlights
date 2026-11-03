@@ -117,27 +117,24 @@ def clear_search():
 
 
 def load():
-    hit = game.locate_anchor("load_replay_button")
-    if not hit:
-        game.save_debug("fail_load_replay_button_gone")
-        sys.exit(6)
-    game.focus_window()
-    time.sleep(0.4)
-    cx, cy = hit[0], hit[1]
-    # attempt styles: raw press-hold, then pyautogui double-click
-    game.press_click(cx, cy)
-    time.sleep(4)
-    if not game.hit_anchor("load_replay_header"):
-        return  # loading screen visible / left the screen
-    game.pyautogui.doubleClick(cx, cy)
-    time.sleep(4)
-    if not game.hit_anchor("load_replay_header"):
-        return
-    # normal single click again twice as last resort
-    game.pyautogui.click(cx, cy)
-    time.sleep(4)
-    if not game.hit_anchor("load_replay_header"):
-        return
+    # the button click sometimes starts loading late (loading screen
+    # anchor arrives >4 s later); wait long enough between styles and
+    # keep one retry cycle before giving up
+    for attempt in range(2):
+        hit = game.locate_anchor("load_replay_button")
+        if not hit:
+            game.save_debug("fail_load_replay_button_gone")
+            sys.exit(6)
+        game.focus_window()
+        time.sleep(0.4)
+        cx, cy = hit[0], hit[1]
+        for style in ("click", "double", "click"):
+            getattr(game.pyautogui, {"click": "click", "double": "doubleClick"}[style])(cx, cy)
+            for _ in range(12):            # up to 12 s for the loading screen
+                time.sleep(1)
+                if not game.hit_anchor("load_replay_header"):
+                    return
+            print(f"load style {style} had no effect (attempt {attempt})")
     game.save_debug("fail_load_replay_no_effect")
     sys.exit(7)
 
