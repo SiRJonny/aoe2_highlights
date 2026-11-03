@@ -137,6 +137,7 @@ def capture_loopback(stop_evt, wav_path):
     if picked is None:
         log("audio: no WASAPI loopback device; video-only segment")
         return
+    import pyaudiowpatch as pyaudio
     p, dev = picked
     frames = []
     stream = p.open(format=pyaudio.paInt16,
@@ -248,11 +249,17 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
     segs = [s for i, s in enumerate(all_segs, 1) if i in wanted]
     out_dir.mkdir(parents=True, exist_ok=True)
     pad = plan.get("pad", 2.0)
-    for i, seg in enumerate(segs):
+    for k, seg in enumerate(segs):
+        if k > 0:
+            # after each take the game sits paused and the frozen module
+            # drops incoming commands: wake it with F3 first
+            game.pyautogui.press("f3")
+            time.sleep(1.5)
+        idx_plan = next(j + 1 for j, s in enumerate(all_segs) if s is seg)
         t0p = seg["t0"] - pad
         x, y = int(seg["x"]), int(seg["y"])
-        name = (f"clip_row{plan.get('row', '?')}_{i + 1:02d}_{seg['kind']}"
-                f"_t{int(seg['t0'])}.mp4")
+        name = (f"clip_row{plan.get('row', '?')}_{idx_plan:02d}_"
+                f"{seg['kind']}_t{int(seg['t0'])}.mp4")
         out_path = out_dir / name
         log(f"segment {i + 1}/{len(segs)} {seg['kind']}: "
             f"t={t0p:.0f}..{seg['t1'] + pad:.0f} tile {x}:{y}")
