@@ -209,10 +209,10 @@ def record_plan(handle, plan, out_dir, fps):
         if not wait_seek_settled(handle, t0p, max_s=900):
             log("  seek never settled; skipping segment")
             continue
-        # awake? no: arrival paused the game and froze the module. F3
-        # unpauses, then set normal speed right away.
+        # arrival paused the game and froze the module: F3 unpauses, and
+        # the set_speed must go out the same instant (at FASTEST every
+        # real 0.1 s is ~1 game second)
         game.pyautogui.press("f3")
-        time.sleep(0.5)
         drive.send(handle, {"action": "set_speed", "speedName": "NORMAL"})
         drive.read_for(handle, 2, quiet=True)
         record_segment(handle, seg, pad, out_path, fps)
