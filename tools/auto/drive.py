@@ -130,6 +130,8 @@ def main():
     ap.add_argument("--x", type=float, default=None)
     ap.add_argument("--y", type=float, default=None)
     ap.add_argument("--v", type=float, default=None)
+    ap.add_argument("--speed-name", default=None,
+                    help="set_speed: SLOW/NORMAL/FAST/FASTEST")
     ap.add_argument("--unit-type", type=float, default=None,
                     help="probe: UnitObjectType id to inspect")
     ap.add_argument("--seconds", type=float, default=30,
@@ -144,8 +146,9 @@ def main():
         return
 
     send(handle, {
-        "action": args.action,
+        "action": "set_speed" if args.action == "speed" else args.action,
         "t": args.t, "x": args.x, "y": args.y, "v": args.v,
+        "speedName": args.speed_name,
         "unitType": args.unit_type,
     })
 
