@@ -273,7 +273,10 @@ def main():
             pipeline.inject()
             time.sleep(4)
         if not start_replay(args.row, args.search):
-            sys.exit("UI start failed")
+            # the UI driver sometimes fails while the game still loads;
+            # the connect below just waits for the module
+            log("WARNING: UI start reported failure; still waiting for "
+                "the module pipe")
         time.sleep(4)
         handle = drive.connect(120)
         t_end = collect(handle, events_path, args.max_minutes)
@@ -285,7 +288,8 @@ def main():
     if do_record and plan.get("segments"):
         log("== pass 2: record segments (replay at normal speed)")
         if not start_replay(args.row, args.search):
-            sys.exit("UI start failed")
+            log("WARNING: UI start reported failure; still waiting for "
+                "the module pipe")
         time.sleep(4)
         handle = drive.connect(120)
         record_plan(handle, plan, out_dir, args.fps)
