@@ -81,39 +81,85 @@ def collect(handle, events_path, max_minutes):
 # --- audio -----------------------------------------------------------
 
 
+def _pick_wasapi_output():
+    """A working WASAPI output device for loopback capture."""
+    import sounddevice as sd
+    try:
+        name = sd.query_devices(sd.default.device[1])["name"]
+    except Exception:
+        name = ""
+    devs = sd.query_devices()
+    hostapis = {i: h["name"] for i, h in enumerate(sd.query_hostapis())}
+    wasapi_outs = [(i, d) for i, d in enumerate(devs)
+                   if d["max_output_channels"]
+                   and hostapis.get(d["hostapi"], "").endswith("WASAPI")]
+    def names_match(a, b):
+        a, b = (a or "").strip(), (b or "").strip()
+        return a == b or (a.startswith(b.split("(")[0].strip())
+                          or b.startswith(a.split("(")[0].strip()))
+    for i, d in wasapi_outs:            # default output first (names may
+        if names_match(d["name"], name):  # differ slightly per hostapi)
+            return i, d
+    if wasapi_outs:
+        return wasapi_outs[0]
+    return None, None
+
+
+def _pick_loopback():
+    """Loopback device mirroring the default WASAPI output, or None."""
+    try:
+        import pyaudiowpatch as pyaudio
+    except ImportError:
+        return None
+    p = pyaudio.PyAudio()
+    try:
+        api = p.get_host_api_info_by_type(pyaudio.paWASAPI)
+        d = p.get_device_info_by_index(api["defaultOutputDevice"])
+        if not d.get("isLoopbackDevice"):
+            for lb in p.get_loopback_device_info_generator():
+                if d["name"].split(" (")[0] in lb["name"]:
+                    d = lb
+                    break
+        if not d.get("isLoopbackDevice"):
+            lb = next(iter(p.get_loopback_device_info_generator()), None)
+            if lb is None:
+                return None
+            d = lb
+        return p, d
+    except Exception:
+        p.terminate()
+        return None
+
+
 def capture_loopback(stop_evt, wav_path):
     """Record the default system output (WASAPI loopback) to a wav."""
-    import sounddevice as sd
-    import soundfile as sf
-
-    out_idx = sd.default.device[1]
-    info = sd.query_devices(out_idx)
-    sr = int(info["default_samplerate"])
-    ch = min(2, info["max_output_channels"])
-    try:
-        extra = sd.WasapiSettings(loopback=True)
-    except Exception:
-        extra = None
-    frames = []
-
-    def cb(indata, fframes, _t, _status):
-        frames.append(indata.copy())
-
-    try:
-        with sd.InputStream(samplerate=sr, channels=ch, device=out_idx,
-                            dtype="float32", extra_settings=extra,
-                            callback=cb, blocksize=0):
-            while not stop_evt.is_set():
-                time.sleep(0.05)
-    except Exception as exc:            # noqa: BLE001 (best-effort audio)
-        log(f"audio: capture failed ({exc}); video-only segment")
+    picked = _pick_loopback()
+    if picked is None:
+        log("audio: no WASAPI loopback device; video-only segment")
         return
-
+    p, dev = picked
+    frames = []
+    stream = p.open(format=pyaudio.paInt16,
+                    channels=int(dev["maxInputChannels"]),
+                    rate=int(dev["defaultSampleRate"]), input=True,
+                    input_device_index=dev["index"], frames_per_buffer=512)
+    try:
+        while not stop_evt.is_set():
+            frames.append(stream.read(512, exception_on_overflow=False))
+    finally:
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
     if frames:
-        import numpy as np
-        data = np.concatenate(frames)
-        sf.write(wav_path, data, sr)
-        log(f"audio: {len(data) / sr:.1f} s -> {wav_path}")
+        import wave
+        data = b"".join(frames)
+        with wave.open(str(wav_path), "wb") as w:
+            w.setnchannels(int(dev["maxInputChannels"]))
+            w.setsampwidth(2)
+            w.setframerate(int(dev["defaultSampleRate"]))
+            w.writeframes(data)
+        log(f"audio: {len(data)//4 / int(dev['defaultSampleRate']):.1f} s "
+            f"-> {wav_path.name}")
 
 
 def mux(video_path, wav_path, out_path):
@@ -189,11 +235,17 @@ def record_segment(handle, seg, pad, out_path, fps):
         log(f"segment {out_path.name}: mux failed, video-only kept")
 
 
-def record_plan(handle, plan, out_dir, fps):
-    segs = plan["segments"]
-    if not segs:
+def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
+    all_segs = plan["segments"]
+    if not all_segs:
         log("plan has no segments; nothing to record")
         return
+    if reuse:
+        # left paused by an earlier run: wake the frozen module
+        game.pyautogui.press("f3")
+        time.sleep(1.5)
+    wanted = set(segs or range(1, len(all_segs) + 1))
+    segs = [s for i, s in enumerate(all_segs, 1) if i in wanted]
     out_dir.mkdir(parents=True, exist_ok=True)
     pad = plan.get("pad", 2.0)
     for i, seg in enumerate(segs):
@@ -239,6 +291,13 @@ def main():
     ap.add_argument("--touch", default=None,
                     help="replay file to os.utime just before pass 1 "
                          "(pushes its copy to row 1 of the list)")
+    ap.add_argument("--segs", default=None,
+                    help="record pass: comma list of 1-based segment "
+                         "indexes (default all)")
+    ap.add_argument("--reuse", action="store_true",
+                    help="record pass: keep the running session instead of "
+                         "restarting the replay (wards off the seek-never-"
+                         "retry flow for missed segments)")
     args = ap.parse_args()
 
     do_collect = args.collect or not (args.collect or args.record)
@@ -287,12 +346,17 @@ def main():
 
     if do_record and plan.get("segments"):
         log("== pass 2: record segments (replay at normal speed)")
-        if not start_replay(args.row, args.search):
-            log("WARNING: UI start reported failure; still waiting for "
-                "the module pipe")
-        time.sleep(4)
-        handle = drive.connect(120)
-        record_plan(handle, plan, out_dir, args.fps)
+        segs = [int(x) for x in args.segs.split(",")] if args.segs else None
+        if args.reuse:
+            handle = drive.connect(30)
+        else:
+            if not start_replay(args.row, args.search):
+                log("WARNING: UI start reported failure; still waiting for "
+                    "the module pipe")
+            time.sleep(4)
+            handle = drive.connect(120)
+        record_plan(handle, plan, out_dir, args.fps, segs=segs,
+                    reuse=args.reuse)
 
 
 def start_replay(row, search):
