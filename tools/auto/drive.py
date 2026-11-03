@@ -73,7 +73,11 @@ def read_now(handle):
             _state, _total, avail = win32pipe.PeekNamedPipe(handle, 0)
         except pywintypes.error as exc:
             if exc.winerror in (109, 233):   # pipe broken/closed
+                print(f"PIPE DEAD during peek: winerror={exc.winerror}",
+                      file=sys.stderr, flush=True)
                 return rows
+            print(f"PIPE ERROR during peek: {exc}", file=sys.stderr,
+                  flush=True)
             raise
         if avail == 0:
             return rows
@@ -85,7 +89,11 @@ def read_now(handle):
                 chunk += more
         except pywintypes.error as exc:
             if exc.winerror in (109, 232, 233):
+                print(f"PIPE DEAD during read: winerror={exc.winerror}",
+                      file=sys.stderr, flush=True)
                 return rows
+            print(f"PIPE ERROR during read: {exc}", file=sys.stderr,
+                  flush=True)
             raise
         _parse_chunk(chunk, rows, quiet=True)
 
@@ -102,7 +110,11 @@ def read_for(handle, timeout_s, quiet=False):
             state, total, avail = win32pipe.PeekNamedPipe(handle, 0)
         except pywintypes.error as exc:
             if exc.winerror in (109, 233):   # pipe broken/closed
+                print(f"PIPE DEAD during peek: winerror={exc.winerror}",
+                      file=sys.stderr, flush=True)
                 break
+            print(f"PIPE ERROR during peek: {exc}", file=sys.stderr,
+                  flush=True)
             raise
         if avail == 0:
             time.sleep(0.2)
@@ -115,7 +127,11 @@ def read_for(handle, timeout_s, quiet=False):
                 chunk += more
         except pywintypes.error as exc:
             if exc.winerror in (109, 232, 233):
+                print(f"PIPE DEAD during read: winerror={exc.winerror}",
+                      file=sys.stderr, flush=True)
                 break
+            print(f"PIPE ERROR during read: {exc}", file=sys.stderr,
+                  flush=True)
             raise
         _parse_chunk(chunk, rows, quiet)
     return rows
