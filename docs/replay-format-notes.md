@@ -173,6 +173,37 @@ Gotchas learned (cost us a full debug cycle):
 
 ## Incremental plan toward auto-highlights
 
+## Highlight pipeline (two-pass, 2026-11)
+
+Architecture: **run full replay once at FASTEST to collect the timeline ->
+event jsonl -> select main events -> record the events at NORMAL speed.**
+
+Per replay row (`N` = replay list row):
+
+1. `py -3.12 tools\auto\record_events.py --row N --force-inject`
+   - swap module in (Delete key + headless injector)
+   - pass 1 `collect`: whole replay at `FASTEST`; module rows (minus stats)
+     to `out\events_rowN.jsonl`; ends when game time stalls 20 s (replay end)
+   - `select_events.py` builds `out\events_plan_rowN.json`:
+     earliest *finished* castle -> full-build clip (start..done + pad);
+     top-2 10 s windows of villager deaths in one 12-tile location cell
+   - pass 2 `record`: UI-restarts the replay, then per segment in time
+     order (never seek backwards): F3 -> seek (pause+camera) -> F3 +
+     `set_speed NORMAL` -> monitor-1 mss video (30 fps mp4v) + WASAPI
+     loopback audio (no mic) -> stop on tick >= t1+pad -> F3 pause;
+     ffmpeg mux (imageio-ffmpeg binary) -> `out\clips_rowN\clip_...mp4`
+
+Module rows used: `bld_event` (`isCastle` now), `vill_death` (1 Hz
+villager-id diff; death at last known x/y, +-1 s / +-1 tile), `tick`.
+`vill_death` also fires for fishing ships and never for spawn+death gaps
+inside one sample interval. Castle `done` uses the owner-building-at-tile
+fallback (`UnitClass.BUILDING`) when no completed-type name mapping exists.
+
+Gotchas that stay true: commands hit a paused module never arrive (send
+after F3), `seek` cannot rewind (t < target only), one IPC connection per
+replay session, ReadFile without pending data blocks (Peek first).
+
+
 1. **Parse timeline** — fast parser + PR fixes → normalized JSON per match:
    ages/builder orders/maps/chat/resigns + activity graph from SYNC.
 2. **Derive highlight candidates** — rule-based scoring over the timeline:
