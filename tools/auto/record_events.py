@@ -232,6 +232,9 @@ def main():
     ap.add_argument("--force-inject", action="store_true",
                     help="unload the running CONTROL (Delete) and inject "
                          "the current module before pass 1")
+    ap.add_argument("--touch", default=None,
+                    help="replay file to os.utime just before pass 1 "
+                         "(pushes its copy to row 1 of the list)")
     args = ap.parse_args()
 
     do_collect = args.collect or not (args.collect or args.record)
@@ -244,6 +247,10 @@ def main():
 
     if do_collect:
         log("== pass 1: collect (replay at full speed)")
+        if args.touch:
+            import os
+            os.utime(args.touch)        # newest mtime -> row 1 in the UI
+            log(f"touched {args.touch}")
         if args.force_inject:
             log("swapping CONTROL module ...")
             game.focus_window()

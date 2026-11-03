@@ -81,14 +81,39 @@ def prime_search(term):
 
 
 def pick_row(row):
+    if row != 1:
+        sys.exit("only --row 1 is supported: reorder the replays list by "
+                 "copying/touching replay files (row heights vary and "
+                 "hover-scroll breaks detection)")
     sb = game.locate_anchor("replays_searchbar")
     if not sb:
-        game.save_debug("fail_searchbar_gone")
-        sys.exit(5)
+        sb = (486, 178)             # measured 1080p fallback
     game.focus_window()
     time.sleep(0.3)
-    game.pyautogui.click(sb[0], sb[1] + 70 + 28 * (row - 1))
+    # row 1 center: the list re-scans on entry and newest file is on top
+    game.pyautogui.click(sb[0], sb[1] + 81)
     time.sleep(1.0)
+
+
+def clear_search():
+    """Empty the (sticky, haunted) replay search box, then blur.
+
+    The box keeps its text across screens and pyautogui keystrokes
+    sometimes land late; blur afterwards so the searchbar anchor
+    template matches again (the focus glow breaks it)."""
+    sb = game.locate_anchor("replays_searchbar")
+    if not sb:
+        sb = (486, 178)
+    game.focus_window()
+    time.sleep(0.3)
+    game.pyautogui.click(sb[0] + 40, sb[1])
+    time.sleep(0.4)
+    game.pyautogui.press("end")
+    for _ in range(30):
+        game.pyautogui.press("backspace")
+    time.sleep(1.5)
+    game.pyautogui.click(sb[0], sb[1] + 81)   # blur into the list
+    time.sleep(0.5)
 
 
 def load():
@@ -193,6 +218,8 @@ def main():
     if args.search:
         print(f"search '{args.search}'")
         prime_search(args.search)
+    else:
+        clear_search()
 
     print("picking row", args.row)
     pick_row(args.row)
