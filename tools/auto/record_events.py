@@ -236,25 +236,47 @@ def record_segment(handle, seg, pad, out_path, fps):
         log(f"segment {out_path.name}: mux failed, video-only kept")
 
 
+def wake(handle, timeout=25):
+    """Unpause a frozen module: F3 until ticks flow again.
+
+    Blind F3 presses are fragile (a miss leaves the game paused and a
+    double restarts the tail unbaited); instead toggle F3 and check
+    after each press whether the module emits ticks. Ends unpaused.
+    """
+    end = time.time() + timeout
+    while time.time() < end:
+        game.focus_window()
+        time.sleep(0.3)
+        game.pyautogui.press("f3")
+        time.sleep(0.5)
+        rows = list(drive.read_for(handle, 2.0, quiet=True))
+        if any(r.get("type") == "tick" for r in rows):
+            return True
+    return False
+
+
 def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
     all_segs = plan["segments"]
     if not all_segs:
         log("plan has no segments; nothing to record")
         return
-    if reuse:
-        # left paused by an earlier run: wake the frozen module
-        game.pyautogui.press("f3")
-        time.sleep(1.5)
     wanted = set(segs or range(1, len(all_segs) + 1))
     segs = [s for i, s in enumerate(all_segs, 1) if i in wanted]
     out_dir.mkdir(parents=True, exist_ok=True)
     pad = plan.get("pad", 2.0)
+    if not reuse:
+        # fresh load: the game runs at NORMAL out of the box; race to
+        # the first seek target at full speed instead (~12 min saved)
+        drive.send(handle, {"action": "set_speed",
+                            "speedName": "FASTEST"})
+        drive.read_for(handle, 2, quiet=True)
     for k, seg in enumerate(segs):
-        if k > 0:
-            # after each take the game sits paused and the frozen module
-            # drops incoming commands: wake it with F3 first
-            game.pyautogui.press("f3")
-            time.sleep(1.5)
+        if reuse or k > 0:
+            # after each take the game sits paused and the frozen
+            # module drops incoming commands: wake it until it ticks
+            if not wake(handle):
+                log("  module never unfroze; skipping segment")
+                continue
         idx_plan = next(j + 1 for j, s in enumerate(all_segs) if s is seg)
         t0p = seg["t0"] - pad
         x, y = int(seg["x"]), int(seg["y"])
@@ -263,15 +285,25 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         out_path = out_dir / name
         log(f"segment {k + 1}/{len(segs)} {seg['kind']}: "
             f"t={t0p:.0f}..{seg['t1'] + pad:.0f} tile {x}:{y}")
-        drive.send(handle, {"action": "seek", "t": t0p, "x": x, "y": y,
-                            "pause": True, "camera": True})
-        if not wait_seek_settled(handle, t0p, max_s=900):
+        settled = False
+        for attempt in (1, 2):
+            drive.send(handle, {"action": "seek", "t": t0p, "x": x,
+                                "y": y, "pause": True, "camera": True})
+            if wait_seek_settled(handle, t0p, max_s=90):
+                settled = True
+                break
+            log(f"  seek attempt {attempt} did not settle; retrying")
+            if not wake(handle):
+                break
+        if not settled:
             log("  seek never settled; skipping segment")
             continue
         # arrival paused the game and froze the module: F3 unpauses, and
         # the set_speed must go out the same instant (at FASTEST every
-        # real 0.1 s is ~1 game second)
+        # real 0.1 s is ~1 game second); camera re-issued in case the
+        # settle came from ticks passing the target (dropped seek)
         game.pyautogui.press("f3")
+        drive.send(handle, {"action": "camera", "x": x, "y": y})
         drive.send(handle, {"action": "set_speed", "speedName": "NORMAL"})
         drive.read_for(handle, 2, quiet=True)
         record_segment(handle, seg, pad, out_path, fps)

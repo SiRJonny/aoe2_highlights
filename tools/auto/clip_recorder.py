@@ -42,14 +42,22 @@ def screen_size():
 
 
 def wait_seek_settled(handle, t0, max_s=300):
-    """Wait until the module acks the seek (or the tick passes t0)."""
+    """Wait until the module acks the seek (or a tick passes t0).
+
+    Tick rows carry the game time under "time" (older code under "t").
+    Checking a tick passing t0 matters when the seek command was
+    dropped: without it this waits out max_s while the replay tail
+    plays at normal speed and the game hits FINISHED REPLAYING GAME.
+    """
     deadline = time.time() + max_s
     while time.time() < deadline:
         for r in drive.read_for(handle, 2, quiet=True):
             if r.get("action") == "seek_reached":
                 return True
-            if r.get("type") == "tick" and (r.get("t") or 0) >= t0:
-                return True
+            if r.get("type") == "tick":
+                t = r.get("t") or r.get("time") or 0
+                if t >= t0:
+                    return True
         time.sleep(0.2)
     return False
 
