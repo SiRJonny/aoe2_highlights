@@ -2,10 +2,15 @@
 --
 -- Every game second sends:
 --   vill_pop  {"time", "counts": {pid: count}}           (1 Hz villager census)
+--   vill_death {"time", "id", "player", "x", "y"}        villager gone since
+--             previous sample (death at last known position, +-1 s / +-1 tile;
+--             also fires for fishing ships/converted units, between-sample
+--             spawn+death pairs are impossible to see)
 --   stats     {"time", "stats": [[age,food,wood,stone,gold,pop], ...]}
 --             per player index 1..n (age: 0=Dark..3=Imperial, PlayerAttribute ids)
 --   bld_*     building lifecycle rows (house_start / house_done / house_lost
---             with isHouse flag; other buildings with isHouse=false)
+--             with isHouse flag; other buildings with isHouse=false,
+--             isCastle=true for castle rows)
 --   tick      debug telemetry every 10 updates
 --
 -- Building lifecycle from Player:GetFoundations() (unfinished buildings are
@@ -37,6 +42,7 @@ local nextSampleTime = 0
 local lastT = nil
 local metaSent = false
 local tickCounter = 0
+local villSeen = {}   -- villager id -> last known {x, y, playerId}
 
 local houseTypes = {}     -- [unitType id] = true, built from UnitObjectType names
 local typeNames = {}      -- [unitType id] = name, filled with house ids at load
@@ -169,11 +175,18 @@ local function buildingAtSameTile(f, p)
     if not ok2 or not states then
         return false
     end
-    for j = 1, #states.id do
-        if states.playerId[j] == f.playerId
-            and math.abs(states.x[j] - f.x) <= 2
-            and math.abs(states.y[j] - f.y) <= 2 then
-            return true
+    -- last resort: any building owned by the player at that tile (covers
+    -- completed types whose name mapping is missing, e.g. castles)
+    local ok3, bst = pcall(function()
+        return GetObjectStates(GetObjectsByClass(UnitClass.BUILDING))
+    end)
+    if ok3 and bst and bst.id then
+        for j = 1, #bst.id do
+            if bst.playerId[j] == f.playerId
+                and math.abs(bst.x[j] - f.x) <= 2
+                and math.abs(bst.y[j] - f.y) <= 2 then
+                return true
+            end
         end
     end
     return false
@@ -205,7 +218,12 @@ local function handleCommands()
             SetGamePaused(false)
             send("ack", { action = action })
         elseif action == "set_speed" then
-            SetReplaySpeed(msg.v or ReplaySpeed.NORMAL)
+            -- v (numeric) or speedName ("SLOW"/"NORMAL"/"FAST"/"FASTEST")
+            local v = msg.v
+            if msg.speedName and ReplaySpeed[msg.speedName] then
+                v = ReplaySpeed[msg.speedName]
+            end
+            SetReplaySpeed(v or ReplaySpeed.NORMAL)
             send("ack", { action = action })
         elseif action == "restart" then
             DispatchRestartGame()
@@ -299,9 +317,11 @@ local function trackBuildings()
     -- new foundations
     for id, f in pairs(seen) do
         if not foundations[id] then
+            local n = typeNames[f.unitType]
             send("bld_event", {
                 event = "start",
                 isHouse = isHouseType(f.unitType),
+                isCastle = n and string.find(n, "CASTLE", 1, true) and true or false,
                 name = typeNames[f.unitType],
                 id = id, unitType = f.unitType, owner = f.playerId,
                 x = f.x, y = f.y, hp = f.hp,
@@ -318,6 +338,9 @@ local function trackBuildings()
                 send("bld_event", {
                     event = "done",
                     isHouse = isHouseType(f.unitType),
+                    isCastle = typeNames[f.unitType]
+                        and string.find(typeNames[f.unitType], "CASTLE",
+                                        1, true) and true or false,
                     name = typeNames[f.unitType],
                     id = id, unitType = f.unitType, owner = f.playerId,
                     x = f.x, y = f.y,
@@ -368,13 +391,27 @@ local function sample()
     -- villager census (v1 behaviour)
     local states = GetObjectStates(GetObjectsByClass(UnitClass.VILLAGER))
     local counts = {}
+    local now = {}
     for i = 1, #states.playerId do
         local pid = states.playerId[i]
         if pid and pid >= 0 then
             counts[pid] = (counts[pid] or 0) + 1
         end
+        now[states.id[i]] = { x = states.x[i], y = states.y[i],
+                              playerId = states.playerId[i] }
     end
     send("vill_pop", { counts = counts })
+
+    -- villager death: id present last sample, gone now; position is the
+    -- last known one (1 game-second resolution, census is game-time
+    -- scheduled so it stays 1 Hz in game time at any replay speed)
+    for id, v in pairs(villSeen) do
+        if not now[id] then
+            send("vill_death", { id = id, player = v.playerId,
+                                 x = v.x, y = v.y })
+        end
+    end
+    villSeen = now
 
     sampleStats()
     trackBuildings()
@@ -388,6 +425,7 @@ function Update()
     if lastT and t and t < lastT then
         nextSampleTime = 0
         foundations = {}
+        villSeen = {}
     end
     lastT = t
 
