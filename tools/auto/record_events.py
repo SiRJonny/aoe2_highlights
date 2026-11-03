@@ -301,7 +301,9 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         for attempt in (1, 2):
             drive.send(handle, {"action": "seek", "t": t0p, "x": x,
                                 "y": y, "pause": True, "camera": True})
-            if wait_seek_settled(handle, t0p, max_s=90):
+            if wait_seek_settled(handle, t0p, max_s=900,
+                                 progress=lambda t: log(
+                                     f"  chase {t:.0f}/{t0p:.0f}")):
                 settled = True
                 break
             log(f"  seek attempt {attempt} did not settle; retrying")
