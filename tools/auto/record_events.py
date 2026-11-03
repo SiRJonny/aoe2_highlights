@@ -220,7 +220,11 @@ def record_plan(handle, plan, out_dir, fps):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--row", type=int, required=True)
+    ap.add_argument("--row", type=int, required=True,
+                    help="which replay profile to run (1-9); resolves to a "
+                         "touch/copy file ('hl<N> replay copy.aoe2record') "
+                         "that is stamped newest so the UI loads it as "
+                         "list row 1")
     ap.add_argument("--search", default=None)
     ap.add_argument("--collect", action="store_true")
     ap.add_argument("--record", action="store_true")
@@ -247,6 +251,14 @@ def main():
 
     if do_collect:
         log("== pass 1: collect (replay at full speed)")
+        if args.touch is None:
+            # profiles: pre-made copy 'hl<N> replay copy.aoe2record'
+            cand = Path.home() / "Games" / "Age of Empires 2 DE"
+            for d in cand.glob("*/savegame"):
+                hit = d / f"hl{args.row} replay copy.aoe2record"
+                if hit.exists():
+                    args.touch = str(hit)
+                    break
         if args.touch:
             import os
             os.utime(args.touch)        # newest mtime -> row 1 in the UI
@@ -280,6 +292,7 @@ def main():
 
 
 def start_replay(row, search):
+    row = 1                            # copies/touch always land on row 1
     ui_cmd = [sys.executable, str(HERE / "start_replay.py")]
     if search:
         ui_cmd += ["--search", search]
