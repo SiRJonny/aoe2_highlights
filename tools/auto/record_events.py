@@ -261,7 +261,7 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         name = (f"clip_row{plan.get('row', '?')}_{idx_plan:02d}_"
                 f"{seg['kind']}_t{int(seg['t0'])}.mp4")
         out_path = out_dir / name
-        log(f"segment {i + 1}/{len(segs)} {seg['kind']}: "
+        log(f"segment {k + 1}/{len(segs)} {seg['kind']}: "
             f"t={t0p:.0f}..{seg['t1'] + pad:.0f} tile {x}:{y}")
         drive.send(handle, {"action": "seek", "t": t0p, "x": x, "y": y,
                             "pause": True, "camera": True})
