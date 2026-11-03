@@ -229,6 +229,9 @@ def main():
     ap.add_argument("--fps", type=float, default=30)
     ap.add_argument("--max-minutes", type=float, default=40)
     ap.add_argument("--out-dir", default=None)
+    ap.add_argument("--force-inject", action="store_true",
+                    help="unload the running CONTROL (Delete) and inject "
+                         "the current module before pass 1")
     args = ap.parse_args()
 
     do_collect = args.collect or not (args.collect or args.record)
@@ -241,6 +244,15 @@ def main():
 
     if do_collect:
         log("== pass 1: collect (replay at full speed)")
+        if args.force_inject:
+            log("swapping CONTROL module ...")
+            game.focus_window()
+            game.pyautogui.keyDown("delete")
+            game.pyautogui.keyUp("delete")
+            time.sleep(4)
+            import pipeline  # noqa: F401  (guarded main)
+            pipeline.inject()
+            time.sleep(4)
         if not start_replay(args.row, args.search):
             sys.exit("UI start failed")
         time.sleep(4)
