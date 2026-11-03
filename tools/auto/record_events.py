@@ -182,7 +182,14 @@ def mux(video_path, wav_path, out_path):
 
 
 def record_segment(handle, seg, pad, out_path, fps):
-    """Record one segment: already-seeked & running; stops on tick."""
+    """Record one segment: settle left the game paused at seg start.
+
+    Capture is armed FIRST (writer + audio), and only then the game is
+    unpaused with the camera re-issued and speed set to NORMAL: any
+    sleep between unpause and the first captured frame eats the
+    window's opening seconds (the housing is replay speed; at NORMAL
+    every second of setup is 1.7 game seconds lost)."""
+    x, y = int(seg["x"]), int(seg["y"])
     t1p = seg["t1"] + pad
     stop = threading.Event()
     wav_path = out_path.with_suffix(".audio.wav")
@@ -195,6 +202,13 @@ def record_segment(handle, seg, pad, out_path, fps):
     if not writer.isOpened():
         stop.set()
         sys.exit("VideoWriter failed to open")
+
+    game.focus_window()
+    time.sleep(0.3)
+    game.pyautogui.press("f3")          # unpause the frozen module
+    drive.send(handle, {"action": "camera", "x": x, "y": y})
+    drive.send(handle, {"action": "set_speed", "speedName": "NORMAL"})
+    drive.read_now(handle)              # drain without waiting
 
     t_cur = 0.0
     last_advance = time.time()
@@ -334,14 +348,9 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         if not settled:
             log("  seek never settled; skipping segment")
             continue
-        # arrival paused the game and froze the module: F3 unpauses, and
-        # the set_speed must go out the same instant (at FASTEST every
-        # real 0.1 s is ~1 game second); camera re-issued in case the
-        # settle came from ticks passing the target (dropped seek)
-        game.pyautogui.press("f3")
-        drive.send(handle, {"action": "camera", "x": x, "y": y})
-        drive.send(handle, {"action": "set_speed", "speedName": "NORMAL"})
-        drive.read_for(handle, 2, quiet=True)
+        # record_segment unpauses itself (F3 + camera + NORMAL) only
+        # after the writer/audio are armed, so the window's opening
+        # game seconds cannot be eaten by setup latency
         record_segment(handle, seg, pad, out_path, fps)
 
 

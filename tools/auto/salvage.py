@@ -69,10 +69,7 @@ def main():
     if not chase(handle, t0p, x, y):
         game.save_debug("salvage_chase_failed")
         sys.exit("seek did not settle after stall recoveries")
-    game.pyautogui.press("f3")
-    drive.send(handle, {"action": "camera", "x": x, "y": y})
-    drive.send(handle, {"action": "set_speed", "speedName": "NORMAL"})
-    drive.read_for(handle, 2, quiet=True)
+    # record_segment unpauses itself after arming the writer/audio
     rec.record_segment(handle, seg, plan.get("pad", 2.0), out_path, 30)
     print(f"done -> {out_path}", flush=True)
 
