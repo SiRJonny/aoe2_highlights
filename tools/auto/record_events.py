@@ -255,6 +255,16 @@ def wake(handle, timeout=25):
     return False
 
 
+def wait_first_tick(handle, timeout_s=120):
+    """Block until the module actually streams ticks (pipe alive)."""
+    end = time.time() + timeout_s
+    while time.time() < end:
+        rows = drive.read_for(handle, 3, quiet=True)
+        if any(r.get("type") == "tick" for r in rows):
+            return True
+    return False
+
+
 def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
     all_segs = plan["segments"]
     if not all_segs:
@@ -269,7 +279,9 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         # the first seek target at full speed instead (~12 min saved)
         drive.send(handle, {"action": "set_speed",
                             "speedName": "FASTEST"})
-        drive.read_for(handle, 2, quiet=True)
+        acks = [r.get("action") for r in drive.read_for(handle, 3,
+                                                        quiet=True)]
+        log(f"speed ack: {acks or 'NONE (pipe dead?)'}")
     for k, seg in enumerate(segs):
         if reuse or k > 0:
             # after each take the game sits paused and the frozen
@@ -394,6 +406,10 @@ def main():
                     "the module pipe")
             time.sleep(4)
             handle = drive.connect(120)
+            if not wait_first_tick(handle, 150):
+                log("WARNING: module never streamed ticks; pipe may be "
+                    "dead (state screenshot will show)")
+                game.save_debug("warning_pipe_no_tick")
         record_plan(handle, plan, out_dir, args.fps, segs=segs,
                     reuse=args.reuse)
 
