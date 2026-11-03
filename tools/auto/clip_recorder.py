@@ -41,19 +41,26 @@ def screen_size():
         return m["width"], m["height"]
 
 
-def wait_seek_settled(handle, t0, max_s=300, progress=None):
+def wait_seek_settled(handle, t0, max_s=300, progress=None, check_end=None):
     """Wait until the module acks the seek (or a tick passes t0).
 
-    Tick rows carry the game time under "t" (older rows under "time").
-    Checking a tick passing t0 matters when the seek command was
-    dropped: without it this waits out max_s while the replay tail
-    plays at normal speed and the game hits FINISHED REPLAYING GAME.
-    At FASTEST the chase from a fresh load to a late t needs several
-    minutes; max_s must exceed that."""
+    Returns True (settled via ack or tick >= t0), "end" (the replay-over
+    screen appeared), "pipe" (stream went quiet >45 s mid-chase) or
+    False (max_s elapsed). Tick rows carry the game time under "t"
+    (older rows under "time"). Checking a tick passing t0 matters when
+    the seek command was dropped: without it this waits out max_s
+    while the replay tail plays and the game hits FINISHED REPLAYING
+    GAME. At FASTEST the chase from a fresh load to a late t needs
+    several minutes; max_s must exceed that."""
     deadline = time.time() + max_s
     seen_t = -1.0
+    last_end_check = 0.0
+    last_data = time.time()
     while time.time() < deadline:
-        for r in drive.read_for(handle, 2, quiet=True):
+        rows = drive.read_for(handle, 2, quiet=True)
+        if rows:
+            last_data = time.time()
+        for r in rows:
             if r.get("action") == "seek_reached":
                 return True
             if r.get("type") == "tick":
@@ -63,6 +70,12 @@ def wait_seek_settled(handle, t0, max_s=300, progress=None):
                 if progress and t - seen_t > 120:
                     seen_t = t
                     progress(t)
+        if check_end and time.time() - last_end_check > 20:
+            last_end_check = time.time()
+            if check_end():
+                return "end"
+        if time.time() - last_data > 45:
+            return "pipe"
         time.sleep(0.2)
     return False
 

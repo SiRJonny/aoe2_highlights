@@ -297,18 +297,40 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         out_path = out_dir / name
         log(f"segment {k + 1}/{len(segs)} {seg['kind']}: "
             f"t={t0p:.0f}..{seg['t1'] + pad:.0f} tile {x}:{y}")
+
+        def chase_log(t, t0p=t0p):
+            log(f"  chase {t:.0f}/{t0p:.0f}" if t >= 0
+                else "  replay over while chasing (needs reload)")
+
+        def replay_over():
+            return game.locate_anchor("leave_map_button") is not None
+
         settled = False
-        for attempt in (1, 2):
+        attempt = 0
+        while attempt < 2 and not settled:
+            attempt += 1
             drive.send(handle, {"action": "seek", "t": t0p, "x": x,
                                 "y": y, "pause": True, "camera": True})
-            if wait_seek_settled(handle, t0p, max_s=1500,
-                                 progress=lambda t: log(
-                                     f"  chase {t:.0f}/{t0p:.0f}")):
+            res = wait_seek_settled(handle, t0p, max_s=1500,
+                                    progress=chase_log,
+                                    check_end=replay_over)
+            if res is True:
                 settled = True
                 break
-            log(f"  seek attempt {attempt} did not settle; retrying")
-            if not wake(handle):
+            if res == "pipe":
+                log("  pipe went quiet mid-chase; reconnecting")
+                handle = drive.connect(30)
+                if not wake(handle):
+                    log("  module still dead after reconnect; skipping")
+                    break
+            elif res == "end":
+                log("  replay finished during chase; reload needed, "
+                    "skipping segment")
                 break
+            else:
+                log(f"  seek attempt {attempt} did not settle; retrying")
+                if not wake(handle):
+                    break
         if not settled:
             log("  seek never settled; skipping segment")
             continue
