@@ -222,6 +222,8 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
     toggles F3 until game time advances and films at NORMAL — no speed
     command here: sent while paused the engine IGNORES it while the
     module acks it anyway (that misleading ack cost two takes).
+    Returns the replay-head time where the segment ended (0.0 when
+    nothing was filmed).
     max_t: replay length — the stop time is clamped just under it so
     end-of-game segments never film the FINISHED REPLAYING screen."""
     x, y = int(seg["x"]), int(seg["y"])
@@ -229,6 +231,7 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
     t1p = seg["t1"] + pa
     if max_t is not None:
         t1p = min(t1p, max_t - 0.5)
+    stopped_head = 0.0
     stop = threading.Event()
     wav_path = out_path.with_suffix(".audio.wav")
     audio = threading.Thread(target=capture_loopback,
@@ -290,8 +293,11 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
     if unpaused:
         # the settle already landed NORMAL while running (verified
         # engine-side at 1.69x); re-send anyway — harmless if applied,
-        # curative if the settle speedName path was skipped
+        # curative if the settle speedName path was skipped. The camera
+        # is re-issued here too: the no-seek path (replay head already
+        # inside the lead-in) never got a settle camera.
         drive.send(handle, {"action": "set_speed", "speedName": "NORMAL"})
+        drive.send(handle, {"action": "camera", "x": x, "y": y})
         drive.read_now(handle)
     if not unpaused:
         game.save_debug("never_unpaused")
@@ -340,10 +346,17 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
     time.sleep(0.3)
     game.pyautogui.press("f3")          # pause the replay again
     time.sleep(1)
+    stopped_head = t_cur
+    if frames < 10:
+        log(f"  take produced only {frames} frames; removing junk clip")
+        out_path.unlink(missing_ok=True)
+        out_path.with_suffix(".audio.wav").unlink(missing_ok=True)
+        return stopped_head
     if mux(out_path, wav_path, out_path):
         log(f"segment {out_path.name}: {frames} frames, done t={t_cur:.1f}")
     else:
         log(f"segment {out_path.name}: mux failed, video-only kept")
+    return stopped_head
 
 
 def wake(handle, timeout=25):
@@ -393,6 +406,7 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
                                                         quiet=True)]
         log(f"speed ack: {acks or 'NONE (pipe dead?)'}")
         fog_off()
+    t_cur_last = None                   # replay head after the last take
     for k, seg in enumerate(segs):
         if reuse or k > 0:
             # after each take the game sits paused and the frozen
@@ -404,6 +418,7 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         pb = seg.get("pb", pad)
         pa = seg.get("pa", pad)
         t0p = seg["t0"] - pb
+        t_head = t_cur_last if t_cur_last is not None else 0.0
         # lead-in: chase this far BEFORE the window; the clip films from
         # the settle point on, so the lead is spare footage that absorbs
         # the ~1-3 game-s between settle and the first captured frame
@@ -424,48 +439,57 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         def replay_over():
             return game.locate_anchor("leave_map_button") is not None
 
-        settled = False
-        attempt = 0
-        while attempt < 2 and not settled:
-            attempt += 1
-            drive.read_now(handle)      # stale seek_reached acks must not
-            drive.send(handle, {"action": "seek", "t": t_target, "x": x,
-                                "y": y, "pause": True, "camera": True,
-                                "speedName": "NORMAL"})
-            res = wait_seek_settled(handle, t_target, max_s=1500,
-                                    progress=chase_log,
-                                    check_end=replay_over)
-            if res is True:
-                settled = True
-                break
-            if res == "pipe":
-                log("  pipe went quiet mid-chase; reconnecting")
-                handle = drive.connect(30)
-                if not wake(handle):
-                    log("  module still dead after reconnect; skipping")
-                    break
-            elif res == "end":
-                log("  replay finished during chase; reload needed, "
-                    "skipping segment")
-                break
+        # a BACKWARD target (previous take ended past it) settles instantly:
+        # no lead, the prelude eats the window. If the window is still ahead
+        # of the head, skip the seek and film onward instead; else skip.
+        if t_cur_last is not None and t_target < t_head - 1.0:
+            if t_head < seg["t1"] + pa - 1.0:
+                log(f"  no seek: head at t={t_head:.0f} past target; "
+                    f"filming onward")
             else:
-                log(f"  seek attempt {attempt} did not settle; retrying")
-                if not wake(handle):
+                log("  window already behind the replay head; skipping")
+                continue
+        else:
+            settled = False
+            attempt = 0
+            while attempt < 2 and not settled:
+                attempt += 1
+                drive.read_now(handle)      # stale seek_reached acks must
+                drive.send(handle, {"action": "seek", "t": t_target, "x": x,
+                                    "y": y, "pause": True, "camera": True,
+                                    "speedName": "NORMAL"})
+                res = wait_seek_settled(handle, t_target, max_s=1500,
+                                        progress=chase_log,
+                                        check_end=replay_over)
+                if res is True:
+                    settled = True
                     break
-        if not settled:
-            log("  seek never settled; skipping segment")
-            continue
-        if game.locate_anchor("leave_map_button") is not None:
-            # settled "True" can still mean the module paused right as the
-            # replay transitioned to the end screen (end-of-file events)
-            game.save_debug("settled_at_end")
-            log("  end screen up after settle; skipping segment")
-            continue
-        # record_segment unpauses itself (F3 + camera + NORMAL) only
-        # after the writer/audio are armed, so the window's opening
-        # game seconds cannot be eaten by setup latency
-        record_segment(handle, seg, pb, pa, out_path, fps,
-                       max_t=plan.get("replay_length"))
+                if res == "pipe":
+                    log("  pipe went quiet mid-chase; reconnecting")
+                    handle = drive.connect(30)
+                    if not wake(handle):
+                        log("  module still dead after reconnect; skipping")
+                        break
+                elif res == "end":
+                    log("  replay finished during chase; reload needed, "
+                        "skipping segment")
+                    break
+                else:
+                    log(f"  seek attempt {attempt} did not settle; retrying")
+                    if not wake(handle):
+                        break
+            if not settled:
+                log("  seek never settled; skipping segment")
+                continue
+            if game.locate_anchor("leave_map_button") is not None:
+                # settled "True" can still mean the module paused right as
+                # the replay transitioned to the end screen (end-of-file
+                # events)
+                game.save_debug("settled_at_end")
+                log("  end screen up after settle; skipping segment")
+                continue
+        t_cur_last = record_segment(handle, seg, pb, pa, out_path, fps,
+                                    max_t=plan.get("replay_length"))
 
 
 def main():
