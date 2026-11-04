@@ -127,9 +127,14 @@ segment. Recording order = chronological; gaps skipped via seek.
   module API exposes no killer id. vill_death rows carry a HEURISTIC
   attribution from the 1 Hz census: by_player = nearest enemy combat unit
   within ~5 tiles, by_bld = nearest enemy TC/castle/tower in range,
-  by_animal = nearest gaia animal within ~3 tiles. All three may coexist;
-  absence = no suspect (fire ship, decay, trap). Verified: mp5 wild-boar
-  kill at t=3305 attributed with the animal 3 tiles from the death.
+  by_animal = nearest gaia animal within ~3 tiles. All three may coexist
+  (row carries every suspect + distance); absence = no suspect (fire
+  ship, decay, trap). Closest-suspect-wins when turning rows into events:
+  the mp5 "boar kill" was a false positive — boar 3 tiles away, but a
+  p1 MILITIA stood 0.57 tiles from the victim (boar had been aggroed
+  earlier by a battle at its spawn; nobody ever clicked it — prey
+  animals aggro on ANY damage, not only the victim's own hunt click).
+  After the rule: 0 animal kills in the 5 games.
 - Attack tasks (who was TASKED to attack): player right-clicks ARE in the
   replay body as ORDER ops (player_id, object_ids tasked, target_id, x/y)
   — `annotate_orders.py` (offline, runs in collect) appends attack_order

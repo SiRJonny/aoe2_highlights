@@ -298,16 +298,32 @@ def build_candidates(rows):
                                    "enemy_tcs": near[:4]}})
 
     # prio 8 (bottom): villager killed by an animal. Attribution is
-    # module-side: gaia-owned aggressive animal within ~3 tiles of the
-    # death (kill attribution is engine-simulated, not in the file).
+    # module-side: gaia aggressive animal near the death (kill
+    # attribution is engine-simulated, not in the file). Closest suspect
+    # wins: an enemy unit/building suspect closer than the animal means
+    # the animal was a bystander (verified: a boar 3 tiles from a kill
+    # whose real suspect was a militia 0.57 tiles away). Prey animals
+    # (boar/elephant/...) only attack once damaged — the provocation can
+    # be anyone's (hunt click, auto-attacking military), not necessarily
+    # the victim's.
+    PREY = ("BOAR", "ELEPHANT", "RHINO", "DEER", "CROCODILE", "OSTRICH")
     for r in rows:
-        if r.get("type") == "vill_death" and r.get("by_animal") \
-                and r.get("x") is not None:
-            cands.append({"kind": "vill_animal", "prio": 8,
-                          "t0": r["time"], "t1": r["time"],
-                          "x": r["x"], "y": r["y"],
-                          "info": {"player": r.get("player"),
-                                   "animal": r.get("by_animal")}})
+        if r.get("type") != "vill_death" or not r.get("by_animal") \
+                or r.get("x") is None:
+            continue
+        a_d = abs(r.get("animal_x", 0) - r["x"]) \
+            + abs(r.get("animal_y", 0) - r["y"])
+        if r.get("by_player") and r.get("by_player_dist", 1e9) <= a_d:
+            continue
+        if r.get("by_bld") and r.get("by_bld_dist", 1e9) <= a_d:
+            continue
+        name = r["by_animal"]
+        cands.append({"kind": "vill_animal", "prio": 8,
+                      "t0": r["time"], "t1": r["time"],
+                      "x": r["x"], "y": r["y"],
+                      "info": {"player": r.get("player"),
+                               "animal": name,
+                               "provoked": any(p in name for p in PREY)}})
     return cands
 
 
