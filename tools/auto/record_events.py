@@ -581,6 +581,12 @@ def main():
                 capture_output=True, text=True, encoding="utf-8",
                 errors="replace")
             log(ann.stdout.strip())
+            ann = subprocess.run(
+                [sys.executable, str(HERE / "annotate_orders.py"),
+                 replay_path, str(events_path)],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace")
+            log(ann.stdout.strip())
         plan = build_plan(events_path, args.row, plan_path)
     else:
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
