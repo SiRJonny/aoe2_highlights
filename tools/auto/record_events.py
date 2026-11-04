@@ -243,10 +243,36 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
 
     game.focus_window()
     time.sleep(0.3)
-    game.pyautogui.press("f3")          # unpause the frozen module
-    drive.send(handle, {"action": "camera", "x": x, "y": y})
-    drive.send(handle, {"action": "set_speed", "speedName": "NORMAL"})
-    drive.read_now(handle)              # drain without waiting
+    # While the game is paused the module's Update still processes commands
+    # (only event sampling stalls) — so set speed+camera BEFORE unpausing
+    # and require the set_speed ack: sending after F3 raced the unpause
+    # (lost NORMAL => the take was ~2 s of FASTEST blur into the end
+    # screen). Fallback: F3 first, then resend until acked.
+    speed_ok = False
+    used_f3 = False
+    for f3_first in (False, True):
+        if f3_first:
+            game.pyautogui.press("f3")   # unpause the frozen module
+            time.sleep(0.4)
+            used_f3 = True
+        for _ in range(3):
+            drive.send(handle, {"action": "camera", "x": x, "y": y})
+            drive.send(handle, {"action": "set_speed",
+                                "speedName": "NORMAL"})
+            rows = drive.read_for(handle, 2.0, quiet=True)
+            if any(r.get("action") == "set_speed" for r in rows):
+                speed_ok = True
+                break
+        if speed_ok:
+            break
+    if not speed_ok:
+        log("  WARNING: set_speed never acked; recording anyway")
+    if not used_f3:
+        # acked while paused: unpause now, replay resumes at NORMAL
+        game.focus_window()
+        time.sleep(0.3)
+        game.pyautogui.press("f3")
+    drive.read_now(handle)              # drain leftovers
 
     t_cur = 0.0
     last_advance = time.time()
