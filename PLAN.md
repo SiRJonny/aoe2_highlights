@@ -83,6 +83,17 @@ segment. Recording order = chronological; gaps skipped via seek.
 
 ## Notes
 
+- Engine truth (proved on mp1 takes): while the game is PAUSED the engine
+  IGNORES SetReplaySpeed AND SetCameraPosition, but the module still acks
+  them — ack ≠ applied. The module's Update also DROPS commands right
+  after SetGamePaused for a moment. So all camera/speed commands are set
+  in the seek-settle branch WHILE RUNNING, then the game pauses; the take
+  itself only toggles F3 until game time actually advances (verified by
+  two distinct tick values), never trusting acks.
+- mp1 end screen freeze: after the replay finishes the module never
+  streams again (no F3 recovery observed); takes must not rely on wake.
+- Prio 1/2 window = [first census drop .. min count] inside the winning
+  15 s window (not the window bounds).
 - Priorities: 1 = highest (user list order). solve_overlaps keeps segments
   in (prio, t0) order: candidates overlapping a KEPT lower-number/higher
   segment are dropped, same-prio overlaps merge.

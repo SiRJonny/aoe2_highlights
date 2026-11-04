@@ -278,6 +278,12 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
             break
         if at_end():
             break
+    if unpaused:
+        # the settle already landed NORMAL while running (verified
+        # engine-side at 1.69x); re-send anyway — harmless if applied,
+        # curative if the settle speedName path was skipped
+        drive.send(handle, {"action": "set_speed", "speedName": "NORMAL"})
+        drive.read_now(handle)
     if not unpaused:
         game.save_debug("never_unpaused")
         log("  game time never advanced after F3; skipping segment")

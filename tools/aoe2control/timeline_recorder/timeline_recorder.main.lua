@@ -263,7 +263,9 @@ local function handleCommands()
                 y = tonumber(msg.y) or 0,
                 pause = msg.pause ~= false,
                 camera = msg.camera ~= false,
+                speedName = msg.speedName,
             }
+            send("ack", { action = "seek", t = seek.t })
         elseif action == "camera" and msg.x then
             SetCameraPosition(Vector2(msg.x, msg.y))
             send("ack", { action = action })
