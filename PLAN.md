@@ -130,6 +130,15 @@ segment. Recording order = chronological; gaps skipped via seek.
   by_animal = nearest gaia animal within ~3 tiles. All three may coexist;
   absence = no suspect (fire ship, decay, trap). Verified: mp5 wild-boar
   kill at t=3305 attributed with the animal 3 tiles from the death.
+- Attack tasks (who was TASKED to attack): player right-clicks ARE in the
+  replay body as ORDER ops (player_id, object_ids tasked, target_id, x/y)
+  — `annotate_orders.py` (offline, runs in collect) appends attack_order
+  rows, one per (player, target) first task. Cross-join vs attributed
+  kills: mp3 9/48, mp5 26/153, mp2 2/8 kills had an explicit right-click
+  on the kill spot seconds earlier; the rest were auto-engagements
+  (aggro/retaliation/patrol), not tasked. ORDER is a generic right-click
+  (attack/hunt/garrison/repair) — the file has no target ownership;
+  resolve by position joins with module rows.
 - Prio 1/2 windows: NOT the sliding window bounds — the segment is
   [first census drop .. min count] inside the winning window (test data
   refined this; staircase decline fixtures).
