@@ -71,12 +71,17 @@ segment. Recording order = chronological; gaps skipped via seek.
       → collect (cross-check `last t` vs mgz SYNC length) → plan → record →
       verify clips (frame counts, AAC audio, frames at event t). Zero-event
       game: log "no events, no video". Commit per game.
-      Games (newest-first, distinct matches — sizes dedupe copies):
-      1. `MP Replay @2026.11.02 190017 (4)` (5.8 min — zero-event canary)
-      2. `MP Replay @2026.11.02 183902 (2)` (28.3 min, = hl2 match)
-      3. `MP Replay @2026.11.01 211553 (4)`
-      4. `MP Replay @2026.11.01 205106 (2)`
-      5. `MP Replay @2026.11.01 200634 (2)`
+      1. [x] `MP Replay @2026.11.02 190017 (4)` (5.8 min canary): 1 clip
+             (resign t=347 @05:47, 177f+AAC; length-clamped, no end screen).
+      2. [x] `MP Replay @2026.11.02 183902 (2)` (28.3 min): 6/7 clips
+             (2× castle_near_tc, 3× army_loss incl 85% wipe, vill_loss,
+             resign); end-of-file 1-unit loss skipped (backward seek+end
+             screen race — guard held, junk removed).
+      3. [x] `MP Replay @2026.11.01 211553 (4)` (27.7 min): 8/8 clips
+             (4× vill_loss, 2× army_loss, 2× resign). Seg 7 needed the
+             no-seek onward-film path + running()-first prelude.
+      4. [ ] `MP Replay @2026.11.01 205106 (2)`
+      5. [ ] `MP Replay @2026.11.01 200634 (2)`
 - [ ] 8. Docs: update `docs/replay-format-notes.md` (spectator/fog,
       priority planner, per-game bootstrap, mgz length check) + final
       commit.
@@ -95,6 +100,13 @@ segment. Recording order = chronological; gaps skipped via seek.
   still running; take re-sends NORMAL once ticks advance.
 - mp1 end screen freeze: after the replay finishes the module never
   streams again (no F3 recovery observed); takes must not rely on wake.
+- Tick cadence: ticks every ~10 game-s; sample rows every 1 game-s
+  (~0.6 wall-s at NORMAL). Advancement guards MUST use sample rows — a
+  2.5 s tick window never sees two distinct t at NORMAL (cost a take).
+- Backward seek target (head past it): window still ahead → skip the
+  seek, film onward (camera re-issued while running); window passed →
+  skip the segment. wake() ends UNPAUSED → the take prelude must test
+  running() BEFORE pressing F3 (first F3 would pause a running game).
 - Prio 1/2 window = [first census drop .. min count] inside the winning
   15 s window (not the window bounds).
 - Priorities: 1 = highest (user list order). solve_overlaps keeps segments
