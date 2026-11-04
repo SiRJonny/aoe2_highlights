@@ -72,8 +72,11 @@ local snapSent = false
 local houseTypes = {}     -- [unitType id] = true, built from UnitObjectType names
 local typeNames = {}      -- [unitType id] = name, filled with house ids at load
 local foundations = {}    -- [objectId] = {unitType, playerId, x, y, hp}
-local seek = nil          -- {"t": number, "x": number, "y": number,
-                          --  "pause": bool, "camera": bool}
+local seek = nil          -- {"t", "x", "y", "pause", "camera", "speedName"}
+local pan = nil           -- camera tween {"x0","y0","x1","y1","seconds",
+                          -- "t0"}: interpolates SetCameraPosition EVERY
+                          -- Update so pans render smoothly (pipe-driven
+                          -- camera moves batch in the IPC pump and step)
 
 local function isHouseType(ot)
     return houseTypes[ot] or false
@@ -385,6 +388,19 @@ local function handleCommands()
         elseif action == "camera" and msg.x then
             SetCameraPosition(Vector2(msg.x, msg.y))
             send("ack", { action = action })
+        elseif action == "pan" then
+            -- engine-side camera tween: interpolates EVERY Update (no
+            -- pipe batching) between the endpoints over `seconds` of
+            -- game time; cancels any running tween
+            pan = {
+                x0 = tonumber(msg.x0) or 0,
+                y0 = tonumber(msg.y0) or 0,
+                x1 = tonumber(msg.x1) or 0,
+                y1 = tonumber(msg.y1) or 0,
+                seconds = math.max(0.1, tonumber(msg.seconds) or 1),
+                t0 = GetGameTime(),
+            }
+            send("ack", { action = action, seconds = pan.seconds })
         elseif action == "pause" then
             SetGamePaused(true)
             send("ack", { action = action })
@@ -738,6 +754,19 @@ end
 function Update()
     handleCommands()
 
+    if pan then
+        -- apply the camera tween every Update (render-smooth; game time
+        -- drives it so the pan ends exactly when the window starts)
+        local t = GetGameTime()
+        local f = math.min(1.0, math.max(0.0,
+            (t - pan.t0) / pan.seconds))
+        SetCameraPosition(Vector2(pan.x0 + (pan.x1 - pan.x0) * f,
+                                  pan.y0 + (pan.y1 - pan.y0) * f))
+        if f >= 1.0 then
+            pan = nil
+        end
+    end
+
     local t = GetGameTime()
     -- time can go backwards (replay restart/rewind): reset the schedule
     if lastT and t and t < lastT then
@@ -747,6 +776,7 @@ function Update()
         militarySeen = {}
         tcSeen = {}
         snapSent = false
+        pan = nil
     end
     lastT = t
 
