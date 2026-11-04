@@ -213,17 +213,22 @@ def fog_off():
     log(f"fog off clicked (was {dark:.0f}% dark)")
 
 
-def record_segment(handle, seg, pb, pa, out_path, fps):
+def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
     """Record one segment: settle left the game paused at seg start.
 
     Capture is armed FIRST (writer + audio), and only then the game is
     unpaused with the camera re-issued and speed set to NORMAL: any
     sleep between unpause and the first captured frame eats the
     window's opening seconds (the housing is replay speed; at NORMAL
-    every second of setup is 1.7 game seconds lost)."""
+    every second of setup is 1.7 game seconds lost).
+    max_t: replay length — clamp the stop time so end-of-game segments
+    do not film the FINISHED REPLAYING GAME screen while the stall
+    detector waits."""
     x, y = int(seg["x"]), int(seg["y"])
     t0p = seg["t0"] - pb
     t1p = seg["t1"] + pa
+    if max_t is not None:
+        t1p = min(t1p, max_t)
     stop = threading.Event()
     wav_path = out_path.with_suffix(".audio.wav")
     audio = threading.Thread(target=capture_loopback,
@@ -388,7 +393,8 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         # record_segment unpauses itself (F3 + camera + NORMAL) only
         # after the writer/audio are armed, so the window's opening
         # game seconds cannot be eaten by setup latency
-        record_segment(handle, seg, pb, pa, out_path, fps)
+        record_segment(handle, seg, pb, pa, out_path, fps,
+                       max_t=plan.get("replay_length"))
 
 
 def main():
