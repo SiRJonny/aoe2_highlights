@@ -2,14 +2,18 @@
 --
 -- Every game second sends:
 --   vill_pop  {"time", "counts": {pid: count}}           (1 Hz villager census)
---   vill_death {"time", "id", "player", "x", "y", ["by_animal", "animal_id",
---             "animal_x", "animal_y"]}                   villager gone since
---             previous sample (death at last known position, +-1 s / +-1 tile;
---             also fires for fishing ships/converted units, between-sample
---             spawn+death pairs are impossible to see). by_animal is set
---             when a gaia-owned aggressive animal (wolf/boar/bear/jaguar/
---             ...) sat within ~3 tiles of the last-known position — kill
---             attribution is engine-side, not in the replay file.
+--   vill_death {"time", "id", "player", "x", "y", ["by_animal", ...],
+--             ["by_player", "by_player_name", "by_player_dist",
+--              "by_bld", "by_bld_owner", "by_bld_dist"]}
+--             villager gone since previous sample (death at last known
+--             position, +-1 s / +-1 tile; also fires for fishing ships/
+--             converted units, between-sample spawn+death pairs are
+--             impossible to see). Heuristic kill attribution at the
+--             death position (engine exposes no killer id): by_animal =
+--             gaia animal within ~3 tiles; by_player = enemy combat
+--             unit within ~5 tiles; by_bld = enemy TC/castle/tower in
+--             range. All three may coexist (raid near a boar); absence
+--             = no suspect (death by fire ship, decay, trap, etc.).
 --   stats     {"time", "stats": [[age,food,wood,stone,gold,pop], ...]}
 --             per player index 1..n (age: 0=Dark..3=Imperial, PlayerAttribute ids)
 --   bld_*     building lifecycle rows (house_start / house_done / house_lost
@@ -116,6 +120,67 @@ local function animalNear(x, y)
                         bd = d
                         best = { name = name, id = states.id[i],
                                  x = states.x[i], y = states.y[i] }
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+local function unitNear(x, y, victimPid)
+    -- nearest ENEMY combat-class unit within ~5 tiles of a death position:
+    -- the surviving attacker is almost always adjacent at the next 1 Hz
+    -- sample (heuristic attribution; the engine exposes no killer id)
+    local best, bd = nil, 5.0
+    for c = 1, #militaryClasses do
+        local ok, states = pcall(function()
+            return GetObjectStates(GetObjectsByClass(militaryClasses[c]))
+        end)
+        if ok and states and states.id then
+            for i = 1, #states.id do
+                local pid = states.playerId[i]
+                if pid and pid >= 1 and pid ~= victimPid then
+                    local d = math.abs(states.x[i] - x)
+                        + math.abs(states.y[i] - y)
+                    if d < bd then
+                        bd = d
+                        best = { player = pid, dist = d,
+                                 name = typeNames[states.unitType[i]],
+                                 id = states.id[i],
+                                 x = states.x[i], y = states.y[i] }
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+local function bldNear(x, y, victimPid)
+    -- nearest enemy defensive building in attack range of a death
+    -- position (TC fire, castle fire, tower fire)
+    local ranges = { TOWN_CENTER = 7.0, CASTLE = 11.0, TOWER = 8.0 }
+    local best, bd = nil, 1e9
+    local ok, states = pcall(function()
+        return GetObjectStates(GetObjectsByClass(UnitClass.BUILDING))
+    end)
+    if ok and states and states.id then
+        for i = 1, #states.id do
+            local pid = states.playerId[i]
+            if pid and pid >= 1 and pid ~= victimPid then
+                local name = typeNames[states.unitType[i]] or ""
+                for pat, range in pairs(ranges) do
+                    if string.find(name, pat) then
+                        local d = math.abs(states.x[i] - x)
+                            + math.abs(states.y[i] - y)
+                        if d <= range and d < bd then
+                            bd = d
+                            best = { player = pid, dist = d, name = name,
+                                     id = states.id[i],
+                                     x = states.x[i], y = states.y[i] }
+                        end
+                        break
                     end
                 end
             end
@@ -638,6 +703,19 @@ local function sample()
                 row.animal_id = a.id
                 row.animal_x = a.x
                 row.animal_y = a.y
+            end
+            local u = unitNear(v.x, v.y, v.playerId)
+            if u then
+                row.by_player = u.player
+                row.by_player_name = u.name
+                row.by_player_dist = u.dist
+                row.by_player_id = u.id
+            end
+            local b = bldNear(v.x, v.y, v.playerId)
+            if b then
+                row.by_bld = b.name
+                row.by_bld_owner = b.player
+                row.by_bld_dist = b.dist
             end
             send("vill_death", row)
         end
