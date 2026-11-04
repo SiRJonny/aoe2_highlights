@@ -243,18 +243,20 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
 
     game.focus_window()
     time.sleep(0.3)
-    # While the game is paused the module's Update still processes commands
-    # (only event sampling stalls) — so set speed+camera BEFORE unpausing
-    # and require the set_speed ack: sending after F3 raced the unpause
-    # (lost NORMAL => the take was ~2 s of FASTEST blur into the end
-    # screen). Fallback: F3 first, then resend until acked.
+    # The engine IGNORES SetReplaySpeed/SetCameraPosition while the game is
+    # paused (the module still acks them from IPC) and drops them while its
+    # Update is frozen right after SetGamePaused — so:
+    #   1. F3 until ticks flow again (wake loop; a blind F3 can double-toggle)
+    #   2. camera + NORMAL with ack confirmation (retry while unpaused)
+    # A lead-in of 10 game-s before the window (chosen by record_plan)
+    # absorbs the FASTEST preroll before NORMAL lands.
     speed_ok = False
-    used_f3 = False
-    for f3_first in (False, True):
-        if f3_first:
-            game.pyautogui.press("f3")   # unpause the frozen module
-            time.sleep(0.4)
-            used_f3 = True
+    for attempt in range(3):
+        game.pyautogui.press("f3")
+        rows = drive.read_for(handle, 1.5, quiet=True)
+        need_speed = True
+        if not any(r.get("type") == "tick" for r in rows):
+            continue
         for _ in range(3):
             drive.send(handle, {"action": "camera", "x": x, "y": y})
             drive.send(handle, {"action": "set_speed",
@@ -262,16 +264,12 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
             rows = drive.read_for(handle, 2.0, quiet=True)
             if any(r.get("action") == "set_speed" for r in rows):
                 speed_ok = True
+                need_speed = False
                 break
-        if speed_ok:
+        if not need_speed:
             break
     if not speed_ok:
         log("  WARNING: set_speed never acked; recording anyway")
-    if not used_f3:
-        # acked while paused: unpause now, replay resumes at NORMAL
-        game.focus_window()
-        time.sleep(0.3)
-        game.pyautogui.press("f3")
     drive.read_now(handle)              # drain leftovers
 
     t_cur = 0.0
@@ -376,6 +374,11 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         pb = seg.get("pb", pad)
         pa = seg.get("pa", pad)
         t0p = seg["t0"] - pb
+        # lead-in: chase this far BEFORE the window so the FASTEST preroll
+        # (wake + camera + NORMAL landing) burns spare game seconds, not
+        # the window itself; the clip films from the settle point on
+        LEAD = 10.0
+        t_target = max(t0p - LEAD, 1.0)
         x, y = int(seg["x"]), int(seg["y"])
         tag = plan.get("tag") or f"row{plan.get('row', '?')}"
         name = (f"clip_{tag}_{idx_plan:02d}_"
@@ -384,8 +387,8 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         log(f"segment {k + 1}/{len(segs)} {seg['kind']}: "
             f"t={t0p:.0f}..{seg['t1'] + pa:.0f} tile {x}:{y}")
 
-        def chase_log(t, t0p=t0p):
-            log(f"  chase {t:.0f}/{t0p:.0f}" if t >= 0
+        def chase_log(t, t_target=t_target):
+            log(f"  chase {t:.0f}/{t_target:.0f}" if t >= 0
                 else "  replay over while chasing (needs reload)")
 
         def replay_over():
@@ -395,9 +398,9 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         attempt = 0
         while attempt < 2 and not settled:
             attempt += 1
-            drive.send(handle, {"action": "seek", "t": t0p, "x": x,
+            drive.send(handle, {"action": "seek", "t": t_target, "x": x,
                                 "y": y, "pause": True, "camera": True})
-            res = wait_seek_settled(handle, t0p, max_s=1500,
+            res = wait_seek_settled(handle, t_target, max_s=1500,
                                     progress=chase_log,
                                     check_end=replay_over)
             if res is True:
