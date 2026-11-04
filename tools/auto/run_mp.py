@@ -12,6 +12,7 @@ Per game:
 Usage:
     py -3.12 tools\\auto\\run_mp.py            # all 5 games
     py -3.12 tools\\auto\\run_mp.py --only 2   # one game
+    py -3.12 tools\\auto\\run_mp.py --collect-only   # no recording
 """
 import argparse
 import json
@@ -49,6 +50,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", type=int, default=None,
                     help="1-based game index from GAMES to run alone")
+    ap.add_argument("--collect-only", action="store_true",
+                    help="bootstrap + collect + plan, never record")
     args = ap.parse_args()
     order = [args.only] if args.only else range(1, len(GAMES) + 1)
 
@@ -76,6 +79,9 @@ def main():
         plan = json.loads((ROOT / "out" / f"events_plan_{tag}.json")
                           .read_text(encoding="utf-8"))
         n = len(plan.get("segments", []))
+        if args.collect_only:
+            summary[tag] = f"collect-only: {n} segments planned"
+            continue
         if n == 0:
             summary[tag] = "no events, no video (valid)"
             continue

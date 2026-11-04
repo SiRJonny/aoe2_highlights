@@ -2,10 +2,14 @@
 --
 -- Every game second sends:
 --   vill_pop  {"time", "counts": {pid: count}}           (1 Hz villager census)
---   vill_death {"time", "id", "player", "x", "y"}        villager gone since
+--   vill_death {"time", "id", "player", "x", "y", ["by_animal", "animal_id",
+--             "animal_x", "animal_y"]}                   villager gone since
 --             previous sample (death at last known position, +-1 s / +-1 tile;
 --             also fires for fishing ships/converted units, between-sample
---             spawn+death pairs are impossible to see)
+--             spawn+death pairs are impossible to see). by_animal is set
+--             when a gaia-owned aggressive animal (wolf/boar/bear/jaguar/
+--             ...) sat within ~3 tiles of the last-known position — kill
+--             attribution is engine-side, not in the replay file.
 --   stats     {"time", "stats": [[age,food,wood,stone,gold,pop], ...]}
 --             per player index 1..n (age: 0=Dark..3=Imperial, PlayerAttribute ids)
 --   bld_*     building lifecycle rows (house_start / house_done / house_lost
@@ -74,6 +78,50 @@ end
 local function isTCType(ot)
     local n = typeNames[ot]
     return n ~= nil and string.sub(n, 1, 11) == "TOWN_CENTER"
+end
+
+local animalTypes = {}    -- [unitType id] = name, aggressive gaia animals
+
+local function buildAnimalTypeSet()
+    -- aggressive/hunt animals that can kill villagers; substring match on
+    -- the UnitObjectType names (DE: WOLF, BOAR, BROWN_BEAR, JAGUAR, ...).
+    -- Player-owned war elephants are excluded later by the owner==0 test.
+    local keywords = { "WOLF", "JAGUAR", "BEAR", "BOAR", "LION", "TIGER",
+                       "LEOPARD", "CROCODILE", "ALLIGATOR", "ELEPHANT" }
+    for value, name in pairs(typeNames) do
+        for i = 1, #keywords do
+            if string.find(name, keywords[i]) then
+                animalTypes[value] = name
+                break
+            end
+        end
+    end
+end
+
+local function animalNear(x, y)
+    -- nearest gaia-owned animal within ~3 tiles of a death position (the
+    -- villager's last-known position is up to 1 sample stale)
+    local best, bd = nil, 3.5
+    for ot, name in pairs(animalTypes) do
+        local ok, states = pcall(function()
+            return GetObjectStates(GetObjectsByType(ot))
+        end)
+        if ok and states and states.id then
+            for i = 1, #states.id do
+                local pid = states.playerId[i]
+                if pid == 0 or pid == -1 then
+                    local d = math.abs(states.x[i] - x)
+                        + math.abs(states.y[i] - y)
+                    if d < bd then
+                        bd = d
+                        best = { name = name, id = states.id[i],
+                                 x = states.x[i], y = states.y[i] }
+                    end
+                end
+            end
+        end
+    end
+    return best
 end
 
 local function buildHouseTypeSet()
@@ -150,14 +198,17 @@ end
 function Init()
     IPC.StartServer(PIPE)
     buildHouseTypeSet()
+    buildAnimalTypeSet()
     militaryClasses = findMilitaryClasses()
     if #militaryClasses > 0 then
         Log("timeline_recorder: pipe " .. PIPE .. " started, "
             .. countHouseTypes() .. " house types known, "
+            .. #animalTypes .. " animal types known, "
             .. #militaryClasses .. " military classes")
     else
         Log("timeline_recorder: pipe " .. PIPE .. " started, "
             .. countHouseTypes() .. " house types known, "
+            .. #animalTypes .. " animal types known, "
             .. "NO military classes found (army census disabled)")
     end
 end
@@ -580,8 +631,15 @@ local function sample()
     -- scheduled so it stays 1 Hz in game time at any replay speed)
     for id, v in pairs(villSeen) do
         if not now[id] then
-            send("vill_death", { id = id, player = v.playerId,
-                                 x = v.x, y = v.y })
+            local row = { id = id, player = v.playerId, x = v.x, y = v.y }
+            local a = animalNear(v.x, v.y)
+            if a then
+                row.by_animal = a.name
+                row.animal_id = a.id
+                row.animal_x = a.x
+                row.animal_y = a.y
+            end
+            send("vill_death", row)
         end
     end
     villSeen = now

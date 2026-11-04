@@ -44,6 +44,7 @@ PADS = {               # per priority (pb, pa) in game seconds
     4: (3.0, 4.0),
     6: (4.0, 2.0),
     7: (15.0, 5.0),
+    8: (2.0, 3.0),     # villager killed by animal (pads not user-specified)
 }
 
 
@@ -295,6 +296,18 @@ def build_candidates(rows):
                           "x": r["x"], "y": r["y"],
                           "info": {"owner": r.get("owner"),
                                    "enemy_tcs": near[:4]}})
+
+    # prio 8 (bottom): villager killed by an animal. Attribution is
+    # module-side: gaia-owned aggressive animal within ~3 tiles of the
+    # death (kill attribution is engine-simulated, not in the file).
+    for r in rows:
+        if r.get("type") == "vill_death" and r.get("by_animal") \
+                and r.get("x") is not None:
+            cands.append({"kind": "vill_animal", "prio": 8,
+                          "t0": r["time"], "t1": r["time"],
+                          "x": r["x"], "y": r["y"],
+                          "info": {"player": r.get("player"),
+                                   "animal": r.get("by_animal")}})
     return cands
 
 

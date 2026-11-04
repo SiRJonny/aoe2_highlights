@@ -152,6 +152,27 @@ def test_same_prio_merge():
     print("ok test_same_prio_merge")
 
 
+def test_vill_animal_bottom_prio():
+    # a wolf kill produces a prio-8 candidate; a plain vill_death must not
+    rows = [
+        {"type": "vill_death", "time": 300, "player": 1,
+         "x": 20, "y": 30, "id": 21, "by_animal": "WOLF",
+         "animal_id": 99, "animal_x": 21, "animal_y": 30},
+        {"type": "vill_death", "time": 305, "player": 2,
+         "x": 80, "y": 90, "id": 22},                      # no attribution
+        {"type": "replay_length", "time": 500},
+    ]
+    cands = se.build_candidates(rows)
+    p8 = [c for c in cands if c["prio"] == 8]
+    assert len(p8) == 1, p8
+    assert p8[0]["kind"] == "vill_animal" and p8[0]["x"] == 20
+    assert p8[0]["info"]["animal"] == "WOLF"
+    assert se.PADS[8] == (2.0, 3.0)
+    # overlaps are padded: wolf kill t=300 +- (2,3) = 298..303
+    assert se.overlaps(p8[0], {"prio": 8, "t0": 302, "t1": 302})
+    print("ok test_vill_animal_bottom_prio")
+
+
 def test_zero_events():
     rows = [{"type": "replay_length", "time": 500},
             vill_pop(1, {1: 30})]
@@ -169,5 +190,6 @@ if __name__ == "__main__":
     test_castle_near_enemy_tc()
     test_overlap_higher_prio_wins()
     test_same_prio_merge()
+    test_vill_animal_bottom_prio()
     test_zero_events()
     print("all select_events tests passed")
