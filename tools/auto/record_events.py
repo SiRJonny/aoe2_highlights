@@ -265,6 +265,10 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
                 log(f"record: time stalled at t={t_cur:.0f} (replay may "
                     f"have ended); stopping segment early")
                 break
+            if frames % 15 == 0 and \
+                    game.locate_anchor("leave_map_button") is not None:
+                log("record: replay end screen reached; stopping segment")
+                break
             next_frame += frame_interval
             if next_frame < time.time():
                 next_frame = time.time()
