@@ -1,166 +1,45 @@
-# Priority Highlight Pipeline (fog-free, MP replays)
+# Priority Highlight Pipeline v3 — event-model refinements (2026-11)
 
-Goal: for any `.aoe2record`, one fast data-collection pass, then a
-priority-planned, non-overlapping segment recording — fog disabled — run
-end-to-end on 5 "MP Replay" games. Zero-event games produce no video.
+The base pipeline is done end-to-end on 5 MP replays (steps 1-8 of the v2
+plan): per-game bootstrap, fast collect, mgz cross-check, priority planner,
+no-pause record flow with pan transitions, per-replay concat. Architecture
+and engine truths live in `docs/replay-format-notes.md`. This plan refines
+the event model; current priorities: 1 vill_loss, 2 army_loss, 3 tc_fall,
+4 castle_fall, 6 resign, 7 castle_near_tc, 8 vill_animal.
 
-## Context (carried over from rows work)
+## Tasks
 
-- Fast collect pass exists: `record_events.py --collect` + module v2
-  (`vill_pop`, `vill_death`, `bld_event` start/done/lost, `stats`, 1 Hz).
-- Replay list is cached per game boot → per-game bootstrap = touch + game
-  restart (`tools/auto/bootstrap_row.py`, uncommitted; pipe-verify must be
-  relaxed — module pipe only exists after a replay loads, not at main menu).
-- mgz SYNC-millis sum = module clock (cross-validated); use it to validate
-  every collect (`last t` ≤ file length) before recording.
-- Record hygiene: arm writer+audio BEFORE F3 unpause; mux via temp +
-  `os.replace`; end screen freezes the module; seek cannot rewind.
-- Yesterday's row-3 bootstrap run: game relaunched + CONTROL injected
-  ("Ready") but module-pipe check was premature → fix in step 5.
+- [ ] 1. Resigned players are event-dead: after a player's resign time,
+       their unit deaths, building losses and census drops never
+       trigger or extend events (post-resign deletions are cleanup,
+       not battles).
+- [ ] 2. Pan glide window: PAN_MAX_GAP 10 -> 20 game-s.
+- [ ] 3. Battle extension: while at least 1 unit/building dies every 2 s
+       within 12 tiles of a death-based event's tile, the take keeps
+       rolling. The extension is prio 9 (lowest): it is dropped when any
+       other event overlaps it ("interrupted"), and merged into its base
+       segment when kept.
+- [ ] 4. Late-game gate: after minute 20 (t > 1200) a death-based event
+       needs at least 10 deaths to trigger.
+- [ ] 5. Buildings count as 2 dead units in army-loss events (same
+       player, within 12 tiles, inside the window): the loss count, the
+       late-game gate and the extension cadence all include them.
+- [ ] 6. Krepost counts as a castle everywhere: module `isCastle` flag
+       covers KREPOST names, planner also falls back to the row name.
+       Applies to castle_fall, castle_near_tc and castle_build.
+- [ ] 7. New event (prio 5, vacant slot) `castle_build`: a castle/Krepost
+       foundation whose area is safe (no deaths within 12 tiles from
+       30 s before start until done) is filmed from start to done sped
+       up at FAST — not FASTEST. Per-segment `speedName` support in the
+       record flow.
+- [ ] 8. castle_near_tc (prio 7) focuses the midpoint tile between the
+       castle and the NEAREST enemy TC inside the 20-tile radius.
+- [ ] 9. Resign events (prio 6) fire only when the LAST player of a team
+       resigns; focus = the densest 5-tile bucket of that team's deaths
+       (buildings = 2 units) in the last 10 s before the resign;
+       fallback = last destroyed building / last death. Team membership
+       from the mgz header when available, else time-cluster of
+       consecutive resigns.
 
-## Final priority spec (user-confirmed; old prio 5 was a typo, removed)
-
-| prio | event | window (game s) |
-|---|---|---|
-| 1 | a player loses ≥10% of their villagers within any 15 s | detected 15 s window ±2 |
-| 2 | a player loses ≥20% of their army within any 15 s | detected 15 s window ±2 |
-| 3 | Town Center falling | t−5 … t+2 |
-| 4 | Castle falling | t−3 … t+4 (pads not user-specified — tunable constant) |
-| 6 | resign/defeated: clip where their last building fell or last unit died | t−4 … t+2 |
-| 7 | castle built (completed) within 20 tiles of an enemy TC | t−15 … t+5 (tunable) |
-| 8 | villager killed by an animal (wolf/boar/bear/...) | t−2 … t+3 (tunable; bottom prio, added later) |
-
-Prio 8 attribution is module-side (kill attribution is engine-simulated,
-not in the replay file): when a villager dies, the module reports any
-gaia-owned aggressive animal within ~3 tiles of the last-known position
-as `by_animal` on the `vill_death` row.
-
-Overlap rule: when windows overlap, keep the highest-priority one and drop
-the lower entirely (never trim). Same-priority overlaps merge into one
-segment. Recording order = chronological; gaps skipped via seek.
-
-## Steps
-
-- [x] 1. Fog off via Spectator Mode: set `Spectator Mode=true` in
-      `tools/aoe2control/settings.timeline.ini` (keep `Modules See
-      Everything=true`), swap settings on the running game (Delete
-      force-inject + `pipeline.inject()`), load a replay, verify fog-free
-      render via frame dump + module still streams. Fallback if UI/module
-      breaks: document and record from involved player's view instead.
-- [x] 2. Module v3 — army events: add military-unit census (`army_pop`,
-      per-player counts, UnitClass.MILITARY or equivalent class set) and
-      `unit_death {time,id,player,x,y}` for military units (same
-      last-known-position gap logic as `vill_death`); tag `bld_event` lost
-      rows with `isTC` (name prefix TOWN_CENTER) and `isCastle` (already
-      there). No behavior change to existing rows. Commit.
-- [x] 3. Resign/defeat annotation: offline mgz action parse (extend the
-      `probe_replay.py` pattern) → `resign {time, player}` rows merged into
-      the events jsonl after collect. Position resolved at plan time from
-      that player's last `bld_event lost` / `unit_death`. Commit.
-- [x] 4. `select_events.py` v2 priority planner: events jsonl + mgz length →
-      ordered plan. Census-based sliding 15 s windows for prio 1/2 (baseline
-      = census at window start; ≥10% vill / ≥20% army loss), destroyed TC /
-      castle from `bld_event lost`, resign from step 3, prio 7 from
-      castle `bld_event done` vs enemy TC positions (`bld_event done`
-      isTC, tile distance ≤ 20, different owner). Empty plan is valid.
-      Unit test with a synthetic events fixture covering overlap
-      drop/merge + zero-event case. Commit.
-- [x] 5. Bootstrap fix: drop premature module-pipe verify in
-      `bootstrap_row.py` (CONTROL pipe check is enough at main menu);
-      commit.
-- [x] 6. Record driver v2: run a whole plan in one replay load — chase to
-      each segment (forward seek), arm capture before unpause, record,
-      skip gaps via seek; backward target → `restart` action then chase.
-      Reuses `clip_recorder.wait_seek_settled` + WASAPI loopback. Commit.
-- [x] 7. End-to-end on 5 "MP Replay" games: pick 5 newest `MP Replay *`
-      in savegame; per game: utime the original file → `bootstrap_row.py`
-      → collect (cross-check `last t` vs mgz SYNC length) → plan → record →
-      verify clips (frame counts, AAC audio, frames at event t). Zero-event
-      game: log "no events, no video". Commit per game.
-      1. [x] `MP Replay @2026.11.02 190017 (4)` (5.8 min canary): 1 clip
-             (resign t=347 @05:47, 177f+AAC; length-clamped, no end screen).
-      2. [x] `MP Replay @2026.11.02 183902 (2)` (28.3 min): 6/7 clips
-             (2× castle_near_tc, 3× army_loss incl 85% wipe, vill_loss,
-             resign); end-of-file 1-unit loss skipped (backward seek+end
-             screen race — guard held, junk removed).
-      3. [x] `MP Replay @2026.11.01 211553 (4)` (27.7 min): 8/8 clips
-             (4× vill_loss, 2× army_loss, 2× resign). Seg 7 needed the
-             no-seek onward-film path + running()-first prelude.
-      4. [x] `MP Replay @2026.11.01 205106 (2)` (36.3 min): 2/2 resign
-             clips (V1gyen @36:09, Katja @36:17 banners, AAC, fog off);
-             mgz length exact (2178.6 = 2178.6).
-      5. [x] `MP Replay @2026.11.01 200634 (2)` (66+ min, ~t4000): 65/65
-             clips (~2.4 GB, army_loss-heavy late game + tc_falls + castle
-             falls + resigns); 3 transient skips re-recorded via
-             `--segs 28,37,39` and verified.
-- [ ] 8. Docs: update `docs/replay-format-notes.md` (spectator/fog,
-      priority planner, per-game bootstrap, mgz length check) + final
-      commit.
-
-## Notes
-
-- Engine truth (experimentally verified on a live replay, exp_paused.png):
-  module seek with pause=true STOPS the game exactly at the target
-  (clock frozen 00:01:00, camera moved). F3 unpauses at the ENGINE's
-  current speed (chase = FASTEST). set_speed NORMAL sent while the game
-  RUNS applies (measured 1.69 game-s/real-s). Module-issued speed/pause
-  while PAUSED are ignored-but-acked (acks mislead). The seek handler
-  originally DROPPED speedName -> settle left the engine at chase speed
-  -> F3 unpaused into FASTEST -> end-of-file events raced to the end
-  screen. Fixed: handler stores speedName; settle lands NORMAL while
-  still running; take re-sends NORMAL once ticks advance.
-- mp1 end screen freeze: after the replay finishes the module never
-  streams again (no F3 recovery observed); takes must not rely on wake.
-- Tick cadence: ticks every ~10 game-s; sample rows every 1 game-s
-  (~0.6 wall-s at NORMAL). Advancement guards MUST use sample rows — a
-  2.5 s tick window never sees two distinct t at NORMAL (cost a take).
-- Backward seek target (head past it): window still ahead → skip the
-  seek, film onward (camera re-issued while running); window passed →
-  skip the segment. wake() ends UNPAUSED → the take prelude must test
-  running() BEFORE pressing F3 (first F3 would pause a running game).
-- Prio 1/2 window = [first census drop .. min count] inside the winning
-  15 s window (not the window bounds).
-- Priorities: 1 = highest (user list order). solve_overlaps keeps segments
-  in (prio, t0) order: candidates overlapping a KEPT lower-number/higher
-  segment are dropped, same-prio overlaps merge.
-- Kill attribution: the replay file has none (engine-simulated), and the
-  module API exposes no killer id. vill_death rows carry a HEURISTIC
-  attribution from the 1 Hz census: by_player = nearest enemy combat unit
-  within ~5 tiles, by_bld = nearest enemy TC/castle/tower in range,
-  by_animal = nearest gaia animal within ~3 tiles. All three may coexist
-  (row carries every suspect + distance); absence = no suspect (fire
-  ship, decay, trap). Closest-suspect-wins when turning rows into events:
-  the mp5 "boar kill" was a false positive — boar 3 tiles away, but a
-  p1 MILITIA stood 0.57 tiles from the victim (boar had been aggroed
-  earlier by a battle at its spawn; nobody ever clicked it — prey
-  animals aggro on ANY damage, not only the victim's own hunt click).
-  After the rule: 0 animal kills in the 5 games.
-- Attack tasks (who was TASKED to attack): player right-clicks ARE in the
-  replay body as ORDER ops (player_id, object_ids tasked, target_id, x/y)
-  — `annotate_orders.py` (offline, runs in collect) appends attack_order
-  rows, one per (player, target) first task. Cross-join vs attributed
-  kills: mp3 9/48, mp5 26/153, mp2 2/8 kills had an explicit right-click
-  on the kill spot seconds earlier; the rest were auto-engagements
-  (aggro/retaliation/patrol), not tasked. ORDER is a generic right-click
-  (attack/hunt/garrison/repair) — the file has no target ownership;
-  resolve by position joins with module rows.
-- Prio 1/2 windows: NOT the sliding window bounds — the segment is
-  [first census drop .. min count] inside the winning window (test data
-  refined this; staircase decline fixtures).
-- Prio 5 in the original request was a duplicate of prio 3 (user: typo,
-  removed). Prio numbers keep their given values (1,2,3,4,6,7).
-- Fog: `Spectator Mode=true` makes replays open in the observer panel
-  (View Lock / Fog of War / All Visible checkboxes + score panel). Fog is
-  ON again at every replay load → the record flow must click the
-  `replay_all_visible` anchor after each load (frame-verified).
-- `UnitClass` has no MILITARY member (dumped via module `probe_classes`):
-  army census sums combat classes (INFANTRY/ARCHERY/CAVALRY/SIEGE_WEAPON/
-  HERO/...); one class per unit so sums never double-count.
-- Army loss baseline subtlety: census at window start can already be
-  post-loss; sliding 15 s windows step 1 game s so the max-loss window is
-  found regardless.
-- `record_events.py` gains a game-agnostic mode for step 7 (explicit
-  `--events/--plan/--out-dir/--touch` already exist; no row/copy semantics
-  for MP originals — touched in place, mtime only).
-- Children do not commit (git index contention); each step is reviewed and
-  committed by the lead.
+Constants: NEARBY_TILES = 12, EXTEND_GAP = 2.0 s, LATE_GATE_T = 1200,
+LATE_MIN_DEATHS = 10, BLD_DEATH_WEIGHT = 2, RESIGN_CLUSTER_S = 180.
