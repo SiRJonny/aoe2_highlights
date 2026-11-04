@@ -278,9 +278,17 @@ Engine truths (each verified experimentally, mp1 debug cycle):
   `pause=False` seeks the module stays alive and the prelude's
   running()-check passes instantly. wake() is reserved for pipe recovery.
 - Pan transitions: gap ≤ 10 game-s + ≤ 40 tiles → the gap is FILMED as a
-  camera glide (interpolated `SetCameraPosition` every 0.5 wall-s while
-  game time advances) instead of a seek jump cut; muxes are deferred so
+  camera glide instead of a seek jump cut; muxes are deferred so
   the gap is captured.
+- Update cadence was the pan bottleneck: CONTROL runs module `Update()`
+  every "Update Interval" seconds of GAME time (`[modules] Update
+  Interval` in the settings ini, default 1 = once per game-second ≈
+  1.7 Hz wall at NORMAL). Every pipe camera command or Lua tween can
+  only apply on Update — measured: both stepped at ~2.5 Hz. Fix:
+  `Update Interval=0.05` (docs: ini values can go as low as 0.01) →
+  ~34 Hz wall; the 1 Hz census keeps its own schedule. With that, the
+  engine-side `pan` action (module tween per Update, game-time-driven)
+  glides; pipe-driven sends still coalesce in the IPC pump.
 - End screen (`FINISHED REPLAYING GAME.`) freezes the module permanently —
   zero pipe rows, no F3 recovery. Guards skip such segments; a <10-frame
   junk take is deleted. Clamp `t1` to `replay_length − 0.5`.

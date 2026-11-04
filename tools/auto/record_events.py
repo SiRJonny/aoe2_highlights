@@ -261,9 +261,11 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
     sent while paused the engine IGNORES it while the module acks it
     anyway (that misleading ack cost two takes).
     pan=(x0, y0, from_t, until_t): film the lead-in as a camera GLIDE
-    from the previous take's tile — while game time runs from from_t to
-    until_t the camera interpolates toward the segment tile (close
-    segments get a pan instead of a jump cut; the game keeps moving).
+    from the previous take's tile — ONE module `pan` command tweens
+    SetCameraPosition every Update (Update Interval=0.05 game-s in
+    settings.timeline.ini) over from_t..until_t of game time, so close
+    segments (<=10 game-s apart) get a smooth pan instead of a jump cut
+    and the camera lands on the segment tile exactly at the window.
     Returns (replay-head time where the take ended, frames written);
     the ffmpeg mux is DEFERRED via mux_queue so the gap between takes
     stays filmed. max_t: replay length — the stop time is clamped just
@@ -356,15 +358,15 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
     pan_x0, pan_y0, pan_from_t, pan_until = (pan if pan
                                              else (0.0, 0.0, 0.0, -1.0))
     if pan:
-        drive.send(handle, {"action": "camera", "x": pan_x0, "y": pan_y0})
-    # wall-clock glide: the old version interpolated from game-time rows
-    # (1 Hz) -> ~6 discrete camera jumps = stutter. Wall-driven at 30 Hz
-    # (handleCommands drains all pending msgs every engine Update) the
-    # steps are small -> visually smooth.
-    pan_wall = max(0.3, (pan_until - pan_from_t) / 1.7)
-    pan_t0 = None
-    pan_done = pan is None
-    last_pan = 0.0
+        # engine-side tween: ONE command; the module interpolates
+        # SetCameraPosition on EVERY Update (Update Interval=0.05 game-s
+        # in settings.timeline.ini -> ~34 Hz wall at NORMAL) and game
+        # time drives it, so the pan ends exactly when this window
+        # starts. Pipe-driven camera sends batch in the IPC pump and
+        # visibly step (pan_experiment.py measured both).
+        drive.send(handle, {"action": "pan", "x0": pan_x0, "y0": pan_y0,
+                            "x1": x, "y1": y,
+                            "seconds": round(pan_until - pan_from_t, 3)})
 
     t_cur = 0.0
     last_advance = time.time()
@@ -381,20 +383,6 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
                 if t and t > t_cur:
                     t_cur = t
                     last_advance = time.time()
-            if not pan_done and time.time() - last_pan >= 0.033:
-                now = time.time()
-                if pan_t0 is None:
-                    pan_t0 = now
-                f = (now - pan_t0) / pan_wall
-                if t_cur >= pan_until:
-                    f = 1.0             # window reached: snap to target
-                f = min(1.0, max(0.0, f))
-                drive.send(handle, {"action": "camera",
-                                    "x": round(pan_x0 + (x - pan_x0) * f, 2),
-                                    "y": round(pan_y0 + (y - pan_y0) * f, 2)})
-                last_pan = now
-                if f >= 1.0:
-                    pan_done = True
             if time.time() - last_advance > STALL_S:
                 log(f"record: time stalled at t={t_cur:.0f} (replay may "
                     f"have ended); stopping segment early")
