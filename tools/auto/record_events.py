@@ -9,11 +9,13 @@ output, no mic), muxed with the imageio-ffmpeg binary.
 Pass 1 stops when game time stalls 20 s (replay ended) or --max-minutes.
 Pass 2 restarts the replay via the UI driver, then, segments in time
 order (never seeking backwards):
-    F3 wake/unpause -> seek (t0-pad, pause on arrival, camera at tile)
-    -> set NORMAL -> record video+audio until tick >= t1+pad -> F3 pause
-
-The CONTROL panel stays open (GUI-only takes; the Shift-close toggle is
-unreliable).
+    seek (t0-pad; NO pause on arrival — the game NEVER stops moving:
+    camera+NORMAL land while running) -> record video+audio until
+    t1+pad -> next segment immediately (no F3 pause between takes).
+Close segments (<=10 game-s gap, <=40 tiles) film the gap as a camera
+PAN to the next tile instead of seek-teleporting; far gaps seek at
+FASTEST with the game left running.
+The CONTROL overlay is Shift-closed at pass start (anchor-verified).
 
 Usage:
     py -3.12 tools\\auto\\record_events.py --row 2 [--search TEXT]
@@ -42,6 +44,8 @@ import game  # noqa: E402
 from clip_recorder import wait_seek_settled  # noqa: E402
 
 STALL_S = 20.0         # no module time advance -> pass/segment ends
+PAN_MAX_GAP = 10.0     # max game-s between takes for a pan transition
+PAN_MAX_TILES = 40.0   # max tile distance for a pan transition
 FFMPEG = None          # resolved lazily (imageio_ffmpeg)
 
 
@@ -187,6 +191,29 @@ def mux(video_path, wav_path, out_path):
 # --- pass 2: record --------------------------------------------------
 
 
+def close_control_panel():
+    """Hide the CONTROL overlay (Shift toggle) so takes show only gameplay.
+
+    Idempotent: toggles only when the panel anchor is visible. The
+    overlay sits at a fixed screen position, so the template match is
+    reliable; the earlier 'unreliable' verdict came from blind toggles
+    (double-toggle left it open). Verified anchor: 0.96+ across games."""
+    if not game.hit_anchor("control_panel"):
+        log("control panel: already hidden")
+        return
+    game.focus_window()
+    time.sleep(0.3)
+    for _ in range(2):
+        game.pyautogui.keyDown("shift")
+        time.sleep(0.12)
+        game.pyautogui.keyUp("shift")
+        time.sleep(0.8)
+        if not game.hit_anchor("control_panel"):
+            log("control panel: closed")
+            return
+    log("control panel: STILL visible (takes will show it)")
+
+
 def fog_off():
     """Disable fog in the spectator replay panel (Spectator Mode=true).
 
@@ -213,19 +240,25 @@ def fog_off():
     log(f"fog off clicked (was {dark:.0f}% dark)")
 
 
-def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
-    """Record one segment: settle left the game paused at seg start.
+def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
+                   pan=None, mux_queue=None):
+    """Record one segment. The game is NEVER paused around takes.
 
     The seek settle branch lands CAMERA + NORMAL replay speed while the
     game is still RUNNING (engine-side; the chase proves SetReplaySpeed
-    is accepted then) and pauses only afterwards. So this function only
-    toggles F3 until game time advances and films at NORMAL — no speed
-    command here: sent while paused the engine IGNORES it while the
-    module acks it anyway (that misleading ack cost two takes).
-    Returns the replay-head time where the segment ended (0.0 when
-    nothing was filmed).
-    max_t: replay length — the stop time is clamped just under it so
-    end-of-game segments never film the FINISHED REPLAYING screen."""
+    is accepted then) and with pause=False it does not pause at all —
+    so this function only verifies advancement (running()) and presses
+    F3 only when the game is actually frozen. No speed command here:
+    sent while paused the engine IGNORES it while the module acks it
+    anyway (that misleading ack cost two takes).
+    pan=(x0, y0, from_t, until_t): film the lead-in as a camera GLIDE
+    from the previous take's tile — while game time runs from from_t to
+    until_t the camera interpolates toward the segment tile (close
+    segments get a pan instead of a jump cut; the game keeps moving).
+    Returns (replay-head time where the take ended, frames written);
+    the ffmpeg mux is DEFERRED via mux_queue so the gap between takes
+    stays filmed. max_t: replay length — the stop time is clamped just
+    under it so end-of-game segments never film the FINISHED screen."""
     x, y = int(seg["x"]), int(seg["y"])
     t0p = seg["t0"] - pb
     t1p = seg["t1"] + pa
@@ -279,12 +312,11 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
         writer.release()
         stop.set()
         audio.join(timeout=5)
-        return
+        return 0.0, 0
 
-    # wake() (record_plan, k>0) can leave the game RUNNING; the no-seek
-    # path depends on it. Pressing F3 then would PAUSE the running game
-    # and the toggle dance would burn ~9 game-s of the window. So test
-    # advancement FIRST and only F3 when actually frozen.
+    # The game should already be RUNNING (no-pause flow); the toggle
+    # loop only fires when it is actually frozen. F3 on a running game
+    # would PAUSE it and eat the window (cost a take once).
     unpaused = running(1.5)
     for toggle in range(3):
         if unpaused or at_end():
@@ -296,10 +328,11 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
         # the settle already landed NORMAL while running (verified
         # engine-side at 1.69x); re-send anyway — harmless if applied,
         # curative if the settle speedName path was skipped. The camera
-        # is re-issued here too: the no-seek path (replay head already
-        # inside the lead-in) never got a settle camera.
+        # is re-issued here too unless panning: the pan glide owns the
+        # camera until the window starts.
         drive.send(handle, {"action": "set_speed", "speedName": "NORMAL"})
-        drive.send(handle, {"action": "camera", "x": x, "y": y})
+        if pan is None:
+            drive.send(handle, {"action": "camera", "x": x, "y": y})
         drive.read_now(handle)
     if not unpaused:
         game.save_debug("never_unpaused")
@@ -307,8 +340,14 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
         writer.release()
         stop.set()
         audio.join(timeout=5)
-        return
+        return 0.0, 0
     drive.read_now(handle)              # drain leftovers
+
+    pan_x0, pan_y0, pan_from_t, pan_until = (pan if pan
+                                             else (0.0, 0.0, 0.0, -1.0))
+    if pan:
+        drive.send(handle, {"action": "camera", "x": pan_x0, "y": pan_y0})
+    last_pan = 0.0
 
     t_cur = 0.0
     last_advance = time.time()
@@ -323,6 +362,15 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
                 if t and t > t_cur:
                     t_cur = t
                     last_advance = time.time()
+            if pan and t_cur < pan_until and time.time() - last_pan > 0.5:
+                # glide the camera while the gap's game time flows;
+                # SetCameraPosition is accepted while running (verified)
+                span = max(0.1, pan_until - pan_from_t)
+                f = min(1.0, max(0.0, (t_cur - pan_from_t) / span))
+                drive.send(handle, {"action": "camera",
+                                    "x": round(pan_x0 + (x - pan_x0) * f, 2),
+                                    "y": round(pan_y0 + (y - pan_y0) * f, 2)})
+                last_pan = time.time()
             if time.time() - last_advance > STALL_S:
                 log(f"record: time stalled at t={t_cur:.0f} (replay may "
                     f"have ended); stopping segment early")
@@ -344,21 +392,16 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
     stop.set()
     audio.join(timeout=5)
 
-    game.focus_window()
-    time.sleep(0.3)
-    game.pyautogui.press("f3")          # pause the replay again
-    time.sleep(1)
     stopped_head = t_cur
     if frames < 10:
         log(f"  take produced only {frames} frames; removing junk clip")
         out_path.unlink(missing_ok=True)
         out_path.with_suffix(".audio.wav").unlink(missing_ok=True)
-        return stopped_head
-    if mux(out_path, wav_path, out_path):
-        log(f"segment {out_path.name}: {frames} frames, done t={t_cur:.1f}")
-    else:
-        log(f"segment {out_path.name}: mux failed, video-only kept")
-    return stopped_head
+        return stopped_head, frames
+    log(f"segment {out_path.name}: {frames} frames, done t={t_cur:.1f}")
+    if mux_queue is not None:
+        mux_queue.append((out_path, wav_path))
+    return stopped_head, frames
 
 
 def wake(handle, timeout=25):
@@ -408,11 +451,15 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
                                                         quiet=True)]
         log(f"speed ack: {acks or 'NONE (pipe dead?)'}")
         fog_off()
+    mux_queue = []
     t_cur_last = None                   # replay head after the last take
+    last_cam = None                     # camera tile of the last GOOD take
+    close_control_panel()
     for k, seg in enumerate(segs):
-        if reuse or k > 0:
-            # after each take the game sits paused and the frozen
-            # module drops incoming commands: wake it until it ticks
+        if reuse:
+            # externally managed session: may sit paused/frozen. The
+            # normal flow leaves the game RUNNING between takes, so no
+            # wake there (a blind F3 would pause a running game).
             if not wake(handle):
                 log("  module never unfroze; skipping segment")
                 continue
@@ -441,15 +488,26 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         def replay_over():
             return game.locate_anchor("leave_map_button") is not None
 
-        # a BACKWARD target (previous take ended past it) settles instantly:
-        # no lead, the prelude eats the window. If the window is still ahead
-        # of the head, skip the seek and film onward instead; else skip.
-        if t_cur_last is not None and t_target < t_head - 1.0:
+        # PAN transition: the previous take just ended close to this
+        # window (<=10 game-s gap, <=40 tiles) — keep the game running
+        # and film the gap as a camera glide instead of seek-teleporting
+        pan = None
+        gap = t0p - t_head
+        if last_cam is not None and 0 <= gap <= PAN_MAX_GAP \
+                and abs(last_cam[0] - x) + abs(last_cam[1] - y) \
+                <= PAN_MAX_TILES:
+            pan = (last_cam[0], last_cam[1], t_head, t0p)
+            log(f"  pan transition: {gap:.1f} game-s gap, "
+                f"{abs(last_cam[0] - x) + abs(last_cam[1] - y):.0f} tiles")
+        elif t_cur_last is not None and t_target < t_head - 1.0:
+            # head already past the target: window ahead -> film onward,
+            # window passed -> skip
             if t_head < seg["t1"] + pa - 1.0:
                 log(f"  no seek: head at t={t_head:.0f} past target; "
                     f"filming onward")
             else:
                 log("  window already behind the replay head; skipping")
+                last_cam = None
                 continue
         else:
             settled = False
@@ -457,8 +515,10 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
             while attempt < 2 and not settled:
                 attempt += 1
                 drive.read_now(handle)      # stale seek_reached acks must
+                # pause=False: the game NEVER stops — settle lands
+                # camera+NORMAL while running and keeps moving
                 drive.send(handle, {"action": "seek", "t": t_target, "x": x,
-                                    "y": y, "pause": True, "camera": True,
+                                    "y": y, "pause": False, "camera": True,
                                     "speedName": "NORMAL"})
                 res = wait_seek_settled(handle, t_target, max_s=1500,
                                         progress=chase_log,
@@ -475,13 +535,16 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
                 elif res == "end":
                     log("  replay finished during chase; reload needed, "
                         "skipping segment")
+                    last_cam = None
                     break
                 else:
+                    # game keeps running (pause=False); just re-send the
+                    # seek — a blind F3 wake here would pause a running
+                    # game at chase speed
                     log(f"  seek attempt {attempt} did not settle; retrying")
-                    if not wake(handle):
-                        break
             if not settled:
                 log("  seek never settled; skipping segment")
+                last_cam = None
                 continue
             if game.locate_anchor("leave_map_button") is not None:
                 # settled "True" can still mean the module paused right as
@@ -489,9 +552,17 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
                 # events)
                 game.save_debug("settled_at_end")
                 log("  end screen up after settle; skipping segment")
+                last_cam = None
                 continue
-        t_cur_last = record_segment(handle, seg, pb, pa, out_path, fps,
-                                    max_t=plan.get("replay_length"))
+        t_cur_last, frames = record_segment(
+            handle, seg, pb, pa, out_path, fps,
+            max_t=plan.get("replay_length"), pan=pan, mux_queue=mux_queue)
+        last_cam = (x, y) if frames >= 10 else None
+    for out_path, wav_path in mux_queue:
+        if mux(out_path, wav_path, out_path):
+            log(f"muxed {out_path.name}")
+        else:
+            log(f"mux FAILED for {out_path.name}; video-only kept")
 
 
 def main():

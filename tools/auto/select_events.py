@@ -41,7 +41,7 @@ PADS = {               # per priority (pb, pa) in game seconds
     1: (2.0, 2.0),
     2: (2.0, 2.0),
     3: (5.0, 2.0),
-    4: (3.0, 4.0),
+    4: (3.0, 6.0),     # +2 s tail: the castle-fall animation runs long
     6: (4.0, 2.0),
     7: (15.0, 5.0),
     8: (2.0, 3.0),     # villager killed by animal (pads not user-specified)

@@ -72,7 +72,7 @@ def test_tc_and_castle_fall():
     p4 = [c for c in cands if c["prio"] == 4]
     assert len(p3) == 1 and p3[0]["t0"] == 800 and p3[0]["x"] == 60
     assert len(p4) == 1 and p4[0]["t0"] == 900
-    assert se.PADS[3] == (5.0, 2.0) and se.PADS[4] == (3.0, 4.0)
+    assert se.PADS[3] == (5.0, 2.0) and se.PADS[4] == (3.0, 6.0)
     print("ok test_tc_and_castle_fall")
 
 
