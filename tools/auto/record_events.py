@@ -412,6 +412,7 @@ def main():
             import os
             os.utime(args.touch)        # newest mtime -> row 1 in the UI
             log(f"touched {args.touch}")
+        replay_path = args.touch
         if args.force_inject:
             log("swapping CONTROL module ...")
             game.focus_window()
@@ -430,6 +431,13 @@ def main():
         handle = drive.connect(120)
         t_end = collect(handle, events_path, args.max_minutes)
         log(f"events -> {events_path} (last t={t_end})")
+        if replay_path:
+            ann = subprocess.run(
+                [sys.executable, str(HERE / "annotate_resigns.py"),
+                 replay_path, str(events_path)],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace")
+            log(ann.stdout.strip())
         plan = build_plan(events_path, args.row, plan_path)
     else:
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
