@@ -220,36 +220,44 @@ replay session, ReadFile without pending data blocks (Peek first).
 Decision recorded: highlights are generated "data-first" (parse → timestamp →
 record), not by watching pixels.
 
-## Priority highlight pipeline (MP replays, 2026-11 v2)
+## Priority highlight pipeline (MP replays, 2026-11 v3)
 
 One command per game (`tools/auto/run_mp.py --only N`, or per-file via
 `bootstrap_row.py --file X.aoe2record` then `record_events.py --tag T --touch X`):
 
 1. **Per-game bootstrap** — the replay list is cached per game boot, so every
    game needs a restart: `bootstrap_row.py` touches the file (newest mtime →
-   row 1), kills/starts the game, injects CONTROL (`settings.timeline.ini`).
-   Pipe verify must wait for a *loaded replay*, not the main menu.
+   row 1), kills/starts the game, injects CONTROL (`settings.timeline.ini`,
+   **Update Interval=0.05** — see engine truths). Pipe verify must wait for a
+   *loaded replay*, not the main menu.
 2. **Collect pass** — whole replay at `FASTEST` (a 28-min match takes ~90 s);
    module rows → `out\events_<tag>.jsonl`. End = game time stalled 20 s
    ("time stalled" means the replay *ended*, expected).
-3. **mgz length cross-check** — `annotate_resigns.py` sums the file's
-   `SYNC`-millis → true replay length; collect's `last t` must match
-   (mp3: 1659.3 = 1659.3). Resign ops from mgz are appended as events with
-   positions resolved at plan time (last building fell / last unit died).
-4. **Priority planner** (`select_events.py` v2, unit-tested): 1 = lose ≥10%
-   villagers in 15 s, 2 = lose ≥20% army in 15 s, 3 = TC falling, 4 = castle
-   falling, 6 = resign/defeat, 7 = castle completed within 20 tiles of an
-   enemy TC. Highest prio wins overlaps entirely; same prio merges;
-   chronological output; zero events → no video (valid). Prio 1/2 segment =
-   [first census drop .. min count] inside the winning window, not the
-   window bounds.
+3. **mgz annotation** — `annotate_resigns.py` sums the file's `SYNC`-millis →
+   true replay length (`last t` must match); appends resign ops **and a
+   `teams` row** (`de.players` `team_id` — authoritative team membership).
+   `annotate_orders.py` appends right-click attack tasks (`ORDER` ops).
+4. **Priority planner** (`select_events.py` v3, 18 unit tests):
+   1 = lose ≥10% villagers in 15 s, 2 = lose ≥20% army in 15 s (destroyed
+   buildings of that player count as 2 dead units), 3 = TC falling,
+   4 = castle/Krepost falling, 5 = safe castle_build filmed start..done at
+   FAST, 6 = resign (team-last; focus = densest 5-tile bucket of the team's
+   deaths in the last 10 s), 7 = castle built near an enemy TC (camera at
+   the castle↔TC midpoint), 8 = villager killed by an animal,
+   9 = battle extension (death cascade every ≤2 s within 12 tiles; lowest
+   prio, yields to other events, merges into its base). After minute 20 a
+   death-based event needs ≥10 deaths. Resigned players are event-dead.
+   Highest prio wins overlaps entirely; same prio merges; chronological;
+   zero events → no video (valid).
 5. **Record pass** — per segment in time order; the game NEVER stops
-   moving: seeks send `pause=False` (settle lands camera+NORMAL while
-   running), no F3 pause between takes, wake only for pipe recovery.
-   Close segments (gap ≤ 10 game-s, ≤ 40 tiles) film the gap as a camera
-   PAN to the next tile instead of seek-teleporting. Muxes deferred to
-   plan end so the inter-take gap stays filmed. Take = verify-advancing,
-   film 30 fps mp4v + WASAPI loopback → `out\clips_<tag>\clip_<tag>_<NN>_<prio>_t<sec>.mp4`.
+   moving: seeks send `pause=False` (settle lands camera+per-segment
+   speed while running), no F3 pause between takes, wake only for pipe
+   recovery, chases bump to FASTEST. Close segments (gap ≤ 20 game-s,
+   ≤ 40 tiles) film the gap as an engine-side camera PAN (module `pan`
+   tween) to the next tile instead of seek-teleporting. Muxes deferred
+   to plan end so the inter-take gap stays filmed. Take = verify-
+   advancing, film 30 fps mp4v + WASAPI loopback →
+   `out\clips_<tag>\clip_<tag>_<NN>_<prio>_t<sec>.mp4`.
    Fog: `Spectator Mode=true` opens replays in the observer panel; the flow
    clicks `replay_all_visible` after *every* load (fog resets per load).
    The CONTROL overlay is Shift-closed at pass start (anchor-verified
