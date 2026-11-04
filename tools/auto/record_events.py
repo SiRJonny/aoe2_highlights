@@ -533,6 +533,11 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
             while attempt < 2 and not settled:
                 attempt += 1
                 drive.read_now(handle)      # stale seek_reached acks must
+                # the game keeps running after the take at NORMAL: bump to
+                # FASTEST for the chase (applies while running, verified),
+                # settle lands NORMAL again at the target
+                drive.send(handle, {"action": "set_speed",
+                                    "speedName": "FASTEST"})
                 # pause=False: the game NEVER stops — settle lands
                 # camera+NORMAL while running and keeps moving
                 drive.send(handle, {"action": "seek", "t": t_target, "x": x,
