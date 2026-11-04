@@ -540,7 +540,9 @@ local function trackBuildings()
                 event = "start",
                 isHouse = isHouseType(f.unitType),
                 isTC = isTCType(f.unitType),
-                isCastle = n and string.find(n, "CASTLE", 1, true) and true or false,
+                isCastle = n and (string.find(n, "CASTLE", 1, true)
+                    or string.find(n, "KREPOST", 1, true))
+                    and true or false,
                 name = typeNames[f.unitType],
                 id = id, unitType = f.unitType, owner = f.playerId,
                 x = f.x, y = f.y, hp = f.hp,
@@ -559,8 +561,11 @@ local function trackBuildings()
                     isHouse = isHouseType(f.unitType),
                     isTC = isTCType(f.unitType),
                     isCastle = typeNames[f.unitType]
-                        and string.find(typeNames[f.unitType], "CASTLE",
-                                        1, true) and true or false,
+                        and (string.find(typeNames[f.unitType], "CASTLE",
+                                         1, true)
+                             or string.find(typeNames[f.unitType], "KREPOST",
+                                            1, true))
+                        and true or false,
                     name = typeNames[f.unitType],
                     id = id, unitType = f.unitType, owner = f.playerId,
                     x = f.x, y = f.y,
@@ -648,6 +653,22 @@ local function trackKeyBuildings()
             end
         end
     end
+    if UnitObjectType.KREPOST then
+        -- Krepost = castle category (Bulgarians): destroyed completed
+        -- Kreposts fire the same castle_fall events
+        local ok, states = pcall(function()
+            return GetObjectStates(GetObjectsByType(UnitObjectType.KREPOST))
+        end)
+        if ok and states and states.id then
+            for j = 1, #states.id do
+                if seen[states.id[j]] == nil then
+                    seen[states.id[j]] = { playerId = states.playerId[j],
+                                           x = states.x[j], y = states.y[j],
+                                           kind = "KREPOST" }
+                end
+            end
+        end
+    end
 
     for id, f in pairs(tcSeen) do
         if not seen[id] then
@@ -655,7 +676,7 @@ local function trackKeyBuildings()
                 event = "lost",
                 isHouse = false,
                 isTC = f.kind == "TOWN_CENTER",
-                isCastle = f.kind == "CASTLE",
+                isCastle = f.kind == "CASTLE" or f.kind == "KREPOST",
                 name = f.kind,
                 id = id, owner = f.playerId,
                 x = f.x, y = f.y,

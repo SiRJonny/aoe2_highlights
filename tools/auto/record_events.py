@@ -44,7 +44,7 @@ import game  # noqa: E402
 from clip_recorder import wait_seek_settled  # noqa: E402
 
 STALL_S = 20.0         # no module time advance -> pass/segment ends
-PAN_MAX_GAP = 10.0     # max game-s between takes for a pan transition
+PAN_MAX_GAP = 20.0     # max game-s between takes for a pan transition
 PAN_MAX_TILES = 40.0   # max tile distance for a pan transition
 FFMPEG = None          # resolved lazily (imageio_ffmpeg)
 
@@ -337,12 +337,14 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
         time.sleep(0.4)                  # pause means this pauses first
         unpaused = running()
     if unpaused:
-        # the settle already landed NORMAL while running (verified
-        # engine-side at 1.69x); re-send anyway — harmless if applied,
-        # curative if the settle speedName path was skipped. The camera
-        # is re-issued here too unless panning: the pan glide owns the
-        # camera until the window starts.
-        drive.send(handle, {"action": "set_speed", "speedName": "NORMAL"})
+        # the settle already landed the segment speed (NORMAL, or the
+        # per-segment override e.g. FAST for castle_build) while running
+        # (verified engine-side at 1.69x); re-send anyway — harmless if
+        # applied, curative if the settle speedName path was skipped.
+        # The camera is re-issued here too unless panning: the pan tween
+        # owns the camera until the window starts.
+        drive.send(handle, {"action": "set_speed",
+                            "speedName": seg.get("speedName") or "NORMAL"})
         if pan is None:
             drive.send(handle, {"action": "camera", "x": x, "y": y})
         drive.read_now(handle)
@@ -540,9 +542,10 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
                                     "speedName": "FASTEST"})
                 # pause=False: the game NEVER stops — settle lands
                 # camera+NORMAL while running and keeps moving
+                speed = seg.get("speedName") or "NORMAL"
                 drive.send(handle, {"action": "seek", "t": t_target, "x": x,
                                     "y": y, "pause": False, "camera": True,
-                                    "speedName": "NORMAL"})
+                                    "speedName": speed})
                 res = wait_seek_settled(handle, t_target, max_s=1500,
                                         progress=chase_log,
                                         check_end=replay_over)

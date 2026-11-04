@@ -1,33 +1,54 @@
-"""Priority-based highlight planner for one replay (select_events v2).
+"""Priority-based highlight planner for one replay (select_events v3).
 
 Input:  a module events jsonl (vill_pop / army_pop / vill_death /
-        unit_death / bld_event / tc_snap / resign / replay_length rows).
+        unit_death / bld_event / tc_snap / resign / teams / replay_length
+        rows).
 Output: a plan json, chronological:
 
     {"row": N, "source": "...", "segments": [...]}
 
-Each segment: {kind, prio, t0, t1, pb, pa, x, y, info} — t0/t1 are the RAW
-event window; pb/pa are the per-segment pads applied at record time
-(record window = t0-pb .. t1+pa).
+Each segment: {kind, prio, t0, t1, pb, pa, speedName, x, y, info} — t0/t1
+are the RAW event window; pb/pa are the per-segment pads applied at
+record time (record window = t0-pb .. t1+pa). speedName overrides the
+replay speed for that take (castle_build films at FAST).
 
-Priorities (user spec; old prio 5 was a typo, removed):
+Priorities:
     1  a player loses >=10% of their villagers within any 15 s   (win ±2)
-    2  a player loses >=20% of their army within any 15 s        (win ±2)
+    2  a player loses >=20% of their army within any 15 s        (win ±2;
+       destroyed buildings of that player count as 2 dead units)
     3  Town Center falling                                       (t-5 .. t+2)
-    4  Castle falling                                            (t-3 .. t+4)
-    6  resign/defeat: last building fell / unit died             (t-4 .. t+2)
-    7  castle built within 20 tiles of an enemy TC               (t-15 .. t+5)
+    4  Castle/Krepost falling                                    (t-3 .. t+6)
+    5  castle/Krepost built in a safe area (no deaths within 12 tiles
+       from 30 s before start until done) -> film the construction at
+       FAST (middle speedup)                                    (start..done ±2)
+    6  resign: only the LAST resign of a team fires; focus = densest
+       5-tile bucket of that team's deaths in the last 10 s     (t-4 .. t+2)
+    7  castle/Krepost built within 20 tiles of an enemy TC; camera
+       focuses the midpoint between castle and that (nearest) TC
+                                                                 (t-15 .. t+5)
+    8  villager killed by an animal                             (t-2 .. t+3)
+    9  battle extension: while >=1 unit/building dies every 2 s within
+       12 tiles of a death-based event, the take keeps rolling; the
+       extension yields to every other event (dropped when interrupted,
+       merged into its base when kept)
 
-Overlap rule: candidates are kept in priority order; a candidate overlapping
-an already-kept (higher-priority) segment is DROPPED entirely. Same-priority
-overlaps merge into one segment. The final plan is chronological; gaps are
-skipped by seeking at record time. Zero events -> empty plan -> no video.
+Resigned players are event-dead: after a player's resign time their
+deaths, building losses and census drops never trigger or extend
+events. After minute 20 (t > 1200) a death-based event needs >= 10
+deaths to trigger.
+
+Overlap rule: candidates are kept in priority order; a candidate
+overlapping an already-kept (higher-priority) segment is DROPPED
+entirely. Same-priority overlaps merge. The final plan is
+chronological; gaps are skipped by seeking at record time. Zero events
+-> empty plan -> no video.
 
 Usage:
     py -3.12 tools\\auto\\select_events.py out\\events_mp1.jsonl
         [--out out\\events_plan_mp1.json] [--row N]
 """
 import argparse
+import bisect
 import json
 import sys
 from pathlib import Path
@@ -36,15 +57,28 @@ LOSS_WINDOW = 15.0     # s, prio 1/2 detection window
 VILL_LOSS_FRAC = 0.10
 ARMY_LOSS_FRAC = 0.20
 CASTLE_NEAR_TC_TILES = 20.0
+NEARBY_TILES = 12.0    # "nearby area" for extensions + building losses
+EXTEND_GAP = 2.0       # s: deaths at least this often keep a battle going
+LATE_GATE_T = 1200.0   # after minute 20 ...
+LATE_MIN_DEATHS = 10   # ... a death-based event needs >=10 deaths
+BLD_DEATH_WEIGHT = 2   # a destroyed building counts as 2 dead units
+RESIGN_FOCUS_S = 10.0  # look this far back for the resign focus
+FOCUS_BUCKET = 5.0     # tile bucket size for the densest-death focus
+RESIGN_CLUSTER_S = 180.0  # fallback team detection without a teams row
+CASTLE_BUILD_SAFE_S = 30.0  # deaths-free span checked before start
+PRIO_CASTLE_BUILD = 5  # the vacated slot; user may renumber
+PRIO_EXTEND = 9        # battle extension: lowest, yields to everything
 
 PADS = {               # per priority (pb, pa) in game seconds
     1: (2.0, 2.0),
     2: (2.0, 2.0),
     3: (5.0, 2.0),
     4: (3.0, 6.0),     # +2 s tail: the castle-fall animation runs long
+    5: (2.0, 2.0),
     6: (4.0, 2.0),
     7: (15.0, 5.0),
     8: (2.0, 3.0),     # villager killed by animal (pads not user-specified)
+    9: (2.0, 2.0),     # extensions merge into their base; pads spare
 }
 
 
@@ -196,12 +230,125 @@ def tc_alive_at(tcs, pid, t, x, y, tol=3.0):
     return False
 
 
+def resigned_at(rows):
+    """{pid: first resign time} — a player is event-dead after this."""
+    out = {}
+    for r in rows:
+        if r.get("type") == "resign" and r.get("player") is not None:
+            t = r.get("time")
+            pid = r["player"]
+            if pid not in out or (t is not None and t < out[pid]):
+                out[pid] = t if t is not None else out.get(pid)
+    return out
+
+
+def teams_of(rows):
+    """{pid: team_id} from the annotator's teams row, or {} when absent."""
+    for r in rows:
+        if r.get("type") == "teams" and isinstance(r.get("teams"), dict):
+            return {int(k): int(v) for k, v in r["teams"].items()}
+    return {}
+
+
+def is_castle_row(r):
+    """Castle OR Krepost (same event category, user rule)."""
+    name = (r.get("name") or "").upper()
+    return bool(r.get("isCastle")) or "KREPOST" in name
+
+
+def death_feed(rows, resigned):
+    """Sorted death feed [(t, x, y, pid, weight)] for extension chains,
+    focuses and building-loss incorporation.
+
+    Deaths of resigned players are excluded entirely (post-resign
+    deletions are cleanup, not battles). A lost building counts as
+    BLD_DEATH_WEIGHT dead units."""
+    feed = []
+    for r in rows:
+        t = r.get("time")
+        x, y = r.get("x"), r.get("y")
+        if t is None or x is None or y is None:
+            continue
+        rt = r.get("type")
+        if rt in ("vill_death", "unit_death"):
+            pid = r.get("player")
+            if pid is not None and pid in resigned \
+                    and resigned[pid] is not None and t > resigned[pid]:
+                continue
+            feed.append((t, x, y, pid, 1))
+        elif rt == "bld_event" and r.get("event") == "lost":
+            pid = r.get("owner")
+            if pid is not None and pid in resigned \
+                    and resigned[pid] is not None and t > resigned[pid]:
+                continue
+            feed.append((t, x, y, pid, BLD_DEATH_WEIGHT))
+    feed.sort(key=lambda d: d[0])
+    return feed
+
+
+def feed_nearby(feed, t_a, t_b, x, y, radius=NEARBY_TILES, pids=None):
+    """Deaths in the feed inside a time span, tile radius and optional
+    player set."""
+    return [d for d in feed
+            if t_a <= d[0] <= t_b
+            and abs(d[1] - x) <= radius and abs(d[2] - y) <= radius
+            and (pids is None or d[3] in pids)]
+
+
+def extend_chain(feed, t_start, x, y):
+    """Battle extension: walk the sorted feed forward from t_start; while
+    at least one death occurs every EXTEND_GAP seconds within
+    NEARBY_TILES, the chain (and the take) keeps rolling. Returns the
+    last chained death time (t_start when nothing chains)."""
+    times = [d[0] for d in feed]
+    i = bisect.bisect_right(times, t_start)
+    last_t = t_start
+    while i < len(feed):
+        d = feed[i]
+        if d[0] > last_t + EXTEND_GAP:
+            break           # sorted: every later death is past the gap too
+        if abs(d[1] - x) <= NEARBY_TILES and abs(d[2] - y) <= NEARBY_TILES:
+            last_t = d[0]
+        i += 1
+    return last_t
+
+
+def focus_cluster(feed, pids, t_a, t_b):
+    """Densest FOCUS_BUCKET-tile death bucket of `pids` in a time span:
+    returns (x, y, weight) or None. Buildings weigh BLD_DEATH_WEIGHT."""
+    buckets = {}
+    for t, x, y, pid, w in feed:
+        if pid not in pids or not (t_a <= t <= t_b):
+            continue
+        key = (int(x // FOCUS_BUCKET), int(y // FOCUS_BUCKET))
+        b = buckets.setdefault(key, [0.0, 0.0, 0.0, 0.0])  # w, sx, sy, n
+        b[0] += w
+        b[1] += x
+        b[2] += y
+        b[3] += 1
+    if not buckets:
+        return None
+    best = max(buckets.values(), key=lambda b: b[0])
+    return (best[1] / best[3], best[2] / best[3], best[0])
+
+
 def build_candidates(rows):
     """All priority candidates as plan-shaped dicts (before overlap solve)."""
     cands = []
+    resigned = resigned_at(rows)
+    feed = death_feed(rows, resigned)
+
+    def late_gate(t, deaths):
+        # after minute 20 a death-based event needs >=10 deaths
+        return t <= LATE_GATE_T or deaths >= LATE_MIN_DEATHS
 
     # prio 1: villager losses
     for c in loss_candidates(rows, "vill_pop", VILL_LOSS_FRAC, min_base=10):
+        rt = resigned.get(c["pid"])
+        if rt is not None and c["t_min"] > rt:
+            continue        # census drop after the resign: cleanup
+        if not late_gate(c["t_min"], c["drop"]):
+            continue
         pos = deaths_position(rows, "vill_death", c["pid"],
                               c["t_first"], c["t_min"])
         if not pos:
@@ -212,9 +359,23 @@ def build_candidates(rows):
                       "info": {"player": c["pid"],
                                "lost": c["drop"], "of": c["base"],
                                "frac": round(c["frac"], 3)}})
+        base_ref = cands[-1]
+        ext_end = extend_chain(feed, c["t_min"], pos[0], pos[1])
+        if ext_end > c["t_min"] + 0.5:
+            cands.append({"kind": "battle_extend", "prio": PRIO_EXTEND,
+                          "t0": c["t_min"], "t1": ext_end,
+                          "x": pos[0], "y": pos[1],
+                          "base_ref": base_ref,
+                          "info": {"base_kind": "vill_loss",
+                                   "base_t0": c["t_first"],
+                                   "player": c["pid"]}})
 
-    # prio 2: army losses
+    # prio 2: army losses — destroyed buildings of the same player count
+    # as BLD_DEATH_WEIGHT dead units each (same window, within 12 tiles)
     for c in loss_candidates(rows, "army_pop", ARMY_LOSS_FRAC, min_base=5):
+        rt = resigned.get(c["pid"])
+        if rt is not None and c["t_min"] > rt:
+            continue
         pos = deaths_position(rows, "unit_death", c["pid"],
                               c["t_first"], c["t_min"])
         if not pos:
@@ -222,65 +383,149 @@ def build_candidates(rows):
                                   c["t_first"], c["t_min"])
         if not pos:
             continue
+        near_blds = feed_nearby(feed, c["t_first"], c["t_first"] + LOSS_WINDOW,
+                                pos[0], pos[1], pids={c["pid"]})
+        bld_n = sum(1 for d in near_blds if d[4] == BLD_DEATH_WEIGHT)
+        bld_w = bld_n * BLD_DEATH_WEIGHT
+        lost_total = c["drop"] + bld_w
+        if not late_gate(c["t_min"], lost_total):
+            continue
         cands.append({"kind": "army_loss", "prio": 2,
                       "t0": c["t_first"], "t1": c["t_min"],
                       "x": pos[0], "y": pos[1],
                       "info": {"player": c["pid"],
-                               "lost": c["drop"], "of": c["base"],
+                               "lost": lost_total,
+                               "units": c["drop"], "buildings": bld_n,
+                               "bld_units": bld_w,
+                               "of": c["base"],
                                "frac": round(c["frac"], 3)}})
+        base_ref = cands[-1]
+        ext_end = extend_chain(feed, c["t_min"], pos[0], pos[1])
+        if ext_end > c["t_min"] + 0.5:
+            cands.append({"kind": "battle_extend", "prio": PRIO_EXTEND,
+                          "t0": c["t_min"], "t1": ext_end,
+                          "x": pos[0], "y": pos[1],
+                          "base_ref": base_ref,
+                          "info": {"base_kind": "army_loss",
+                                   "base_t0": c["t_first"],
+                                   "player": c["pid"]}})
 
-    # prio 3 / 4: TC and castle destruction (completed buildings)
+    # prio 3 / 4: TC and castle/Krepost destruction (completed buildings)
     for r in rows:
         if r.get("type") != "bld_event" or r.get("event") != "lost":
             continue
+        rt = resigned.get(r.get("owner"))
+        if rt is not None and r.get("time") is not None and r["time"] > rt:
+            continue        # a resigned player's buildings are cleanup
         if r.get("isTC"):
             cands.append({"kind": "tc_fall", "prio": 3,
                           "t0": r["time"], "t1": r["time"],
                           "x": r["x"], "y": r["y"],
                           "info": {"owner": r.get("owner"),
                                    "name": r.get("name")}})
-        elif r.get("isCastle"):
+        elif is_castle_row(r):
             cands.append({"kind": "castle_fall", "prio": 4,
                           "t0": r["time"], "t1": r["time"],
                           "x": r["x"], "y": r["y"],
                           "info": {"owner": r.get("owner"),
                                    "name": r.get("name")}})
 
-    # prio 6: resign/defeat — clip where their last building fell or unit died
-    tcs = tc_positions(rows)
+    # prio 5: castle/Krepost built in a SAFE area -> film the whole
+    # construction sped up at FAST (middle speed, not FASTEST). Safety
+    # proxy: no deaths within 12 tiles from 30 s before start until done
+    # (a raid on the builders would kill someone nearby).
+    dones_by_id = {}
     for r in rows:
-        if r.get("type") != "resign":
+        if r.get("type") == "bld_event" and r.get("event") == "done":
+            dones_by_id.setdefault(r.get("id"), r)
+    for r in rows:
+        if r.get("type") != "bld_event" or r.get("event") != "start" \
+                or not is_castle_row(r) or r.get("time") is None:
             continue
-        t, pid = r["time"], r.get("player")
-        # prefer the LAST destroyed building; fall back to the last death
-        last_bld = None
-        for rr in rows:
-            if rr.get("type") == "bld_event" and rr.get("event") == "lost" \
-                    and rr.get("owner") == pid and rr.get("time") is not None \
-                    and rr["time"] <= t and rr.get("x") is not None:
-                if last_bld is None or rr["time"] > last_bld["time"]:
-                    last_bld = rr
-        if last_bld:
-            pos = (last_bld["x"], last_bld["y"], 1)
+        done = dones_by_id.get(r.get("id"))
+        if not done or done.get("time") is None \
+                or done["time"] < r["time"]:
+            continue        # never completed (or stale id reuse)
+        t0, t1 = r["time"], done["time"]
+        if feed_nearby(feed, t0 - CASTLE_BUILD_SAFE_S, t1,
+                       r["x"], r["y"]):
+            continue        # contested ground: not a safe build
+        cands.append({"kind": "castle_build", "prio": PRIO_CASTLE_BUILD,
+                      "t0": t0, "t1": t1,
+                      "x": r["x"], "y": r["y"], "speedName": "FAST",
+                      "info": {"owner": r.get("owner"),
+                               "name": r.get("name"),
+                               "safe": True}})
+
+    # prio 6: resign — only the LAST resign of a team fires. Focus = the
+    # densest 5-tile bucket of that team's deaths in the last 10 s
+    # (buildings weigh 2); fallback = densest bucket over the whole game,
+    # then the resigning player's last destroyed building / last death.
+    tcs = tc_positions(rows)
+    teams = teams_of(rows)
+    resigns = [(r["time"], r.get("player")) for r in rows
+               if r.get("type") == "resign" and r.get("time") is not None]
+    if teams:
+        by_team = {}
+        for t, pid in resigns:
+            by_team.setdefault(teams.get(pid), []).append((t, pid))
+        groups = [(team, [p for _, p in members], max(members))
+                  for team, members in by_team.items()]
+    else:
+        # no teams row: cluster consecutive resigns (a team defeat is a
+        # burst of resigns; a solo quit stands alone)
+        groups = []
+        cluster = []
+        for t, pid in sorted(resigns):
+            if cluster and t - cluster[-1][0] > RESIGN_CLUSTER_S:
+                groups.append((None, [p for _, p in cluster],
+                               max(cluster)))
+                cluster = []
+            cluster.append((t, pid))
+        if cluster:
+            groups.append((None, [p for _, p in cluster], max(cluster)))
+    for team, pids, (t, last_pid) in groups:
+        pids = set(pids)
+        # the focus counts the team's battle deaths even if a member had
+        # already resigned (task 1 only bars post-resign CLEANUP events)
+        all_feed = death_feed(rows, {})
+        focus = focus_cluster(all_feed, pids, t - RESIGN_FOCUS_S, t)
+        if not focus:
+            focus = focus_cluster(all_feed, pids, 0.0, t)
+        if focus:
+            pos = (focus[0], focus[1], focus[2])
         else:
-            pos = deaths_position(rows, "vill_death", pid, 0.0, t)
-            alt = deaths_position(rows, "unit_death", pid, 0.0, t)
+            pos = deaths_position(rows, "vill_death", last_pid, 0.0, t)
+            alt = deaths_position(rows, "unit_death", last_pid, 0.0, t)
             if alt and (not pos or alt[2] > pos[2]):
                 pos = alt
+        if not pos:
+            # no deaths at all: focus the resigning player's base (TC)
+            for t_from, t_to, tx, ty in tcs.get(last_pid, []):
+                if t_from <= t and (t_to is None or t_to > t) \
+                        and tx is not None:
+                    pos = (tx, ty, 0)
+                    break
         if not pos:
             continue
         cands.append({"kind": "resign", "prio": 6,
                       "t0": t, "t1": t,
                       "x": pos[0], "y": pos[1],
-                      "info": {"player": pid}})
+                      "info": {"player": last_pid,
+                               "team": team,
+                               "team_pids": sorted(pids),
+                               "resigns": len(pids)}})
 
-    # prio 7: castle built within 20 tiles of an enemy TC
-    dones = {}
-    for r in rows:
-        if r.get("type") == "bld_event" and r.get("event") == "done" \
-                and r.get("isCastle"):
-            dones.setdefault(r["id"], r)
+    # prio 7: castle/Krepost built within 20 tiles of an enemy TC — the
+    # camera focuses the MIDPOINT between the castle and the nearest
+    # qualifying enemy TC
+    dones = dones_by_id
     for cid, r in dones.items():
+        rt = resigned.get(r.get("owner"))
+        if rt is not None and r.get("time") is not None and r["time"] > rt:
+            continue
+        if not is_castle_row(r):
+            continue
         enemies = [pid for pid in tcs if pid not in (r.get("owner"), 0, None)]
         near = []
         for pid in enemies:
@@ -289,13 +534,17 @@ def build_candidates(rows):
                         and tx is not None:
                     d = ((tx - r["x"]) ** 2 + (ty - r["y"]) ** 2) ** 0.5
                     if d <= CASTLE_NEAR_TC_TILES:
-                        near.append((pid, round(d, 1)))
+                        near.append((pid, round(d, 1), tx, ty))
         if near:
+            pid, d, tx, ty = min(near, key=lambda n: n[1])
             cands.append({"kind": "castle_near_tc", "prio": 7,
                           "t0": r["time"], "t1": r["time"],
-                          "x": r["x"], "y": r["y"],
+                          "x": (r["x"] + tx) / 2, "y": (r["y"] + ty) / 2,
                           "info": {"owner": r.get("owner"),
-                                   "enemy_tcs": near[:4]}})
+                                   "enemy_tcs": [(n[0], n[1])
+                                                 for n in near[:4]],
+                                   "midpoint_of": pid,
+                                   "tc_dist": d}})
 
     # prio 8 (bottom): villager killed by an animal. Attribution is
     # module-side: gaia aggressive animal near the death (kill
@@ -311,6 +560,9 @@ def build_candidates(rows):
         if r.get("type") != "vill_death" or not r.get("by_animal") \
                 or r.get("x") is None:
             continue
+        rt = resigned.get(r.get("player"))
+        if rt is not None and r.get("time") is not None and r["time"] > rt:
+            continue        # resigned player's villager: cleanup
         a_d = abs(r.get("animal_x", 0) - r["x"]) \
             + abs(r.get("animal_y", 0) - r["y"])
         if r.get("by_player") and r.get("by_player_dist", 1e9) <= a_d:
@@ -334,15 +586,26 @@ def overlaps(a, b):
     return a0 < b1 and b0 < a1
 
 
+def is_own_base(base, ext):
+    """True when `base` is the base segment that spawned the `ext`
+    extension candidate (extensions must not be dropped by their own
+    base's padded window)."""
+    return base.get("kind") == ext.get("info", {}).get("base_kind") \
+        and abs(base["t0"] - ext["info"].get("base_t0", -1.0)) < 0.5
+
+
 def solve_overlaps(cands):
-    """Higher priority wins entirely; same priority merges. Then chrono."""
+    """Higher priority wins entirely; same priority merges. Extensions
+    (prio 9) only yield to OTHER events — they merge into their base
+    when they survive, and die with it when the base was dropped."""
     cands.sort(key=lambda c: (c["prio"], c["t0"]))
     kept = []
     for c in cands:
         same = [k for k in kept if k["prio"] == c["prio"]
                 and overlaps(k, c)]
         higher = [k for k in kept if k["prio"] < c["prio"]
-                  and overlaps(k, c)]
+                  and overlaps(k, c)
+                  and not (c["prio"] == PRIO_EXTEND and is_own_base(k, c))]
         if higher:
             continue
         if same:
@@ -365,10 +628,25 @@ def solve_overlaps(cands):
         if key in seen:
             continue
         seen.add(key)
-        pb, pa = PADS[k["prio"]]
-        k["pb"], k["pa"] = pb, pa
         final.append(k)
-    return final
+    # merge surviving extensions into their base segment: the take just
+    # keeps rolling; an extension whose base was dropped dies with it
+    bases = [k for k in final if k["prio"] != PRIO_EXTEND]
+    out = []
+    for k in final:
+        if k["prio"] == PRIO_EXTEND:
+            base = k.pop("base_ref", None)
+            if base is not None and any(b is base for b in bases):
+                base["t1"] = max(base["t1"], k["t1"])
+                base["info"]["extended"] = True
+            continue
+        out.append(k)
+    for k in out:
+        pb, pa = PADS[k["prio"]]
+        k.setdefault("pb", pb)
+        k.setdefault("pa", pa)
+        k.setdefault("speedName", "NORMAL")
+    return sorted(out, key=lambda c: c["t0"])
 
 
 def main():
@@ -404,8 +682,11 @@ def main():
     if not segs:
         print("no events selected (zero events is valid: no video)")
     for s in segs:
+        speed = "" if s.get("speedName", "NORMAL") == "NORMAL" \
+            else f" @ {s['speedName']}"
         print(f"p{s['prio']} {s['kind']:15s} t={s['t0']:.0f}..{s['t1']:.0f} "
-              f"+({s['pb']},{s['pa']}) tile {s['x']:.0f}:{s['y']:.0f} "
+              f"+({s['pb']},{s['pa']}) tile {s['x']:.0f}:{s['y']:.0f}"
+              f"{speed} "
               f"{json.dumps(s['info'])[:80]}")
     print(f"plan: {out_path} ({len(segs)} segments)")
 

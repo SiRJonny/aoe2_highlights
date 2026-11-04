@@ -173,6 +173,186 @@ def test_vill_animal_bottom_prio():
     print("ok test_vill_animal_bottom_prio")
 
 
+def test_resigned_player_filtered():
+    # player 2 resigns at 500: census drops after that are cleanup, and
+    # their TC loss post-resign must not fire either
+    rows = [vill_pop(t, {2: 20}) for t in range(0, 600, 1)]
+    rows += [vill_pop(600, {2: 17}), vill_pop(601, {2: 16})]
+    rows += [vill_pop(t, {2: 16}) for t in range(602, 700, 1)]
+    rows += [{"type": "vill_death", "time": 600, "player": 2,
+              "x": 10, "y": 10, "id": 1},
+             {"type": "resign", "time": 500, "player": 2},
+             {"type": "bld_event", "event": "lost", "isTC": True,
+              "isCastle": False, "name": "TOWN_CENTER", "id": 9,
+              "owner": 2, "time": 650, "x": 40, "y": 40},
+             {"type": "replay_length", "time": 800}]
+    cands = se.build_candidates(rows)
+    assert not [c for c in cands if c["prio"] == 1], cands
+    assert not [c for c in cands if c["prio"] == 3], cands
+    # a drop BEFORE the resign still fires
+    rows = [vill_pop(t, {2: 20}) for t in range(0, 460, 1)]
+    rows += [vill_pop(460, {2: 17}), vill_pop(461, {2: 16})]
+    rows += [vill_pop(t, {2: 16}) for t in range(462, 500, 1)]
+    rows += [{"type": "vill_death", "time": 460, "player": 2,
+              "x": 10, "y": 10, "id": 2},
+             {"type": "resign", "time": 500, "player": 2},
+             {"type": "replay_length", "time": 800}]
+    cands = se.build_candidates(rows)
+    assert [c for c in cands if c["prio"] == 1]
+    print("ok test_resigned_player_filtered")
+
+
+def test_battle_extension_and_interrupt():
+    # base vill loss 700-702; deaths keep coming every ~2 s until 708,
+    # then a 3 s gap ends the chain
+    rows = [vill_pop(t, {1: 20}) for t in range(0, 700, 1)]
+    rows += [vill_pop(700, {1: 19}), vill_pop(701, {1: 18}),
+             vill_pop(702, {1: 17})]
+    rows += [vill_pop(t, {1: 17}) for t in range(703, 800, 1)]
+    for i, dt in enumerate((704.0, 706.0, 708.0)):
+        rows.append({"type": "unit_death", "time": dt, "player": 3,
+                     "x": 100 + i, "y": 50, "id": 100 + i})
+    rows.append({"type": "vill_death", "time": 700, "player": 1,
+                 "x": 100, "y": 50, "id": 1})
+    rows.append({"type": "replay_length", "time": 1200})
+    segs = se.solve_overlaps(se.build_candidates(rows))
+    p1 = [s for s in segs if s["prio"] == 1]
+    assert len(p1) == 1 and p1[0]["t1"] == 708, p1
+    assert p1[0]["info"].get("extended") is True, p1[0]
+    assert not [s for s in segs if s["prio"] == 9], segs
+    # an interrupting TC fall inside the extension kills the extension
+    # (t=709: overlaps the extension's padded span 700..711 but not the
+    # base's 698..704)
+    rows.append({"type": "bld_event", "event": "lost", "isTC": True,
+                 "isCastle": False, "name": "TOWN_CENTER", "id": 9,
+                 "owner": 3, "time": 709, "x": 103, "y": 51})
+    segs = se.solve_overlaps(se.build_candidates(rows))
+    p1 = [s for s in segs if s["prio"] == 1]
+    assert p1[0]["t1"] == 702, p1           # extension dropped
+    assert [s for s in segs if s["prio"] == 3], segs
+    print("ok test_battle_extension_and_interrupt")
+
+
+def test_late_gate():
+    # after minute 20, a drop of <10 units does not trigger; >=10 does
+    base = [vill_pop(t, {1: 20}) for t in range(0, 1300, 1)]
+    rows = base + [vill_pop(1250, {1: 19}), vill_pop(1251, {1: 18}),
+                   vill_pop(1252, {1: 17})]
+    rows += [vill_pop(t, {1: 17}) for t in range(1253, 1400, 1)]
+    rows += [{"type": "vill_death", "time": 1250, "player": 1,
+              "x": 10, "y": 10, "id": 1},
+             {"type": "replay_length", "time": 1500}]
+    assert not [c for c in se.build_candidates(rows) if c["prio"] == 1]
+    rows += [vill_pop(1350, {1: 14}), vill_pop(1351, {1: 11}),
+             vill_pop(1352, {1: 7})]
+    rows += [vill_pop(t, {1: 7}) for t in range(1353, 1400, 1)]
+    rows.append({"type": "vill_death", "time": 1351, "player": 1,
+                 "x": 11, "y": 11, "id": 2})
+    got = [c for c in se.build_candidates(rows) if c["prio"] == 1]
+    assert got and got[0]["info"]["lost"] == 10, got
+    print("ok test_late_gate")
+
+
+def test_buildings_count_as_units():
+    # t > 1200: 4 units (20% of 20) + 3 destroyed buildings (=6) = 10
+    # -> passes the late gate; units alone would not
+    rows = [army_pop(t, {1: 20}) for t in range(1200, 1400, 1)]
+    rows += [army_pop(1400, {1: 18}), army_pop(1401, {1: 17}),
+             army_pop(1402, {1: 16}), army_pop(1403, {1: 16})]
+    rows += [army_pop(t, {1: 16}) for t in range(1404, 1500, 1)]
+    for i in range(4):
+        rows.append({"type": "unit_death", "time": 1400 + i * 0.5,
+                     "player": 1, "x": 60, "y": 60, "id": 1 + i})
+    for i in range(3):
+        rows.append({"type": "bld_event", "event": "lost", "isTC": False,
+                     "isCastle": False, "name": "STABLE", "id": 20 + i,
+                     "owner": 1, "time": 1401 + i, "x": 62 + i, "y": 61})
+    rows.append({"type": "replay_length", "time": 1600})
+    p2 = [c for c in se.build_candidates(rows) if c["prio"] == 2]
+    assert len(p2) == 1, p2
+    assert p2[0]["info"]["lost"] == 10, p2[0]
+    assert p2[0]["info"]["buildings"] == 3 and p2[0]["info"]["units"] == 4
+    print("ok test_buildings_count_as_units")
+
+
+def test_krepost_is_castle():
+    rows = [{"type": "bld_event", "event": "lost", "isTC": False,
+             "isCastle": False, "name": "KREPOST", "id": 30,
+             "owner": 5, "time": 900, "x": 70, "y": 80},
+            {"type": "replay_length", "time": 1200}]
+    p4 = [c for c in se.build_candidates(rows) if c["prio"] == 4]
+    assert len(p4) == 1 and p4[0]["info"]["name"] == "KREPOST", p4
+    print("ok test_krepost_is_castle")
+
+
+def test_near_tc_midpoint():
+    # two enemy TCs in range; camera focuses the midpoint to the NEAREST
+    rows = [{"type": "tc_snap", "owner": 2, "x": 50, "y": 50,
+             "kind": "TOWN_CENTER"},
+            {"type": "tc_snap", "owner": 3, "x": 78, "y": 60,
+             "kind": "TOWN_CENTER"},
+            {"type": "bld_event", "event": "done", "isTC": False,
+             "isCastle": True, "name": "CASTLE", "id": 40,
+             "owner": 4, "time": 1500, "x": 62, "y": 58},
+            {"type": "replay_length", "time": 2000}]
+    p7 = [c for c in se.build_candidates(rows) if c["prio"] == 7]
+    assert len(p7) == 1, p7
+    assert p7[0]["info"]["midpoint_of"] == 2, p7[0]
+    assert abs(p7[0]["x"] - 56) < 0.01 and abs(p7[0]["y"] - 54) < 0.01
+    print("ok test_near_tc_midpoint")
+
+
+def test_resign_team_last():
+    # teams row: p1+p2 team 7, p3 team 9; p1 and p2 resign 10 s apart ->
+    # only p2 (the last of team 7) and p3 fire; focus = team deaths
+    rows = [
+        {"type": "teams", "teams": {"1": 7, "2": 7, "3": 9}},
+        {"type": "tc_snap", "owner": 3, "x": 200, "y": 200,
+         "kind": "TOWN_CENTER"},
+        {"type": "unit_death", "time": 1005, "player": 1,
+         "x": 50, "y": 50, "id": 1},
+        {"type": "unit_death", "time": 1006, "player": 2,
+         "x": 51, "y": 51, "id": 2},
+        {"type": "resign", "time": 1000, "player": 1},
+        {"type": "resign", "time": 1010, "player": 2},
+        {"type": "resign", "time": 1100, "player": 3},
+        {"type": "replay_length", "time": 1300},
+    ]
+    p6 = [c for c in se.build_candidates(rows) if c["prio"] == 6]
+    assert len(p6) == 2, p6
+    last1 = [c for c in p6 if c["info"]["player"] == 2]
+    assert last1 and last1[0]["t0"] == 1010, p6
+    # focus: densest bucket of team-7 deaths in [1000, 1010] = (50.5, 50.5)
+    assert abs(last1[0]["x"] - 50.5) < 0.01, last1[0]
+    p3 = [c for c in p6 if c["info"]["player"] == 3]
+    assert p3 and p3[0]["x"] == 200 and p3[0]["y"] == 200, p3
+    print("ok test_resign_team_last")
+
+
+def test_castle_build_safe():
+    # a castle foundation with no deaths nearby films at FAST (prio 5);
+    # a contested one does not fire
+    def rows_with(death):
+        rows = [{"type": "bld_event", "event": "start", "isTC": False,
+                 "isCastle": True, "name": "CASTLE", "id": 50,
+                 "owner": 4, "time": 1200, "x": 100, "y": 100},
+                {"type": "bld_event", "event": "done", "isTC": False,
+                 "isCastle": True, "name": "CASTLE", "id": 50,
+                 "owner": 4, "time": 1260, "x": 100, "y": 100},
+                {"type": "replay_length", "time": 1500}]
+        if death:
+            rows.insert(2, {"type": "unit_death", "time": 1250,
+                            "player": 4, "x": 103, "y": 102, "id": 9})
+        return rows
+    p5 = [c for c in se.build_candidates(rows_with(False))
+          if c["prio"] == 5]
+    assert len(p5) == 1 and p5[0]["speedName"] == "FAST", p5
+    assert p5[0]["t0"] == 1200 and p5[0]["t1"] == 1260
+    assert not [c for c in se.build_candidates(rows_with(True))
+                if c["prio"] == 5]
+    print("ok test_castle_build_safe")
+
+
 def test_zero_events():
     rows = [{"type": "replay_length", "time": 500},
             vill_pop(1, {1: 30})]
@@ -191,5 +371,13 @@ if __name__ == "__main__":
     test_overlap_higher_prio_wins()
     test_same_prio_merge()
     test_vill_animal_bottom_prio()
+    test_resigned_player_filtered()
+    test_battle_extension_and_interrupt()
+    test_late_gate()
+    test_buildings_count_as_units()
+    test_krepost_is_castle()
+    test_near_tc_midpoint()
+    test_resign_team_last()
+    test_castle_build_safe()
     test_zero_events()
     print("all select_events tests passed")
