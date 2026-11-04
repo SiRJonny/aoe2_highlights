@@ -168,14 +168,23 @@ def capture_loopback(stop_evt, wav_path):
             f"-> {wav_path.name}")
 
 
-def mux(video_path, wav_path, out_path):
+def mux(video_path, wav_path, out_path, audio_ss=None, audio_span=None):
     global FFMPEG
     if FFMPEG is None:
         import imageio_ffmpeg
         FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
     tmp = out_path.with_suffix(".merged.mp4")
-    cmd = [FFMPEG, "-y", "-i", str(video_path), "-i", str(wav_path),
-           "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", str(tmp)]
+    # the wav is armed before the video writer and joined after it, so it
+    # is longer on both ends — trim it to the video's wall span and cap
+    # the output at the shorter stream (else the tail shows a frozen
+    # last frame over trailing audio: a ~2 s "pause" at clip end)
+    cmd = [FFMPEG, "-y", "-i", str(video_path)]
+    if audio_ss is not None:
+        cmd += ["-ss", f"{max(0.0, audio_ss):.3f}"]
+        if audio_span is not None:
+            cmd += ["-t", f"{max(0.0, audio_span):.3f}"]
+    cmd += ["-i", str(wav_path), "-c:v", "copy", "-c:a", "aac",
+            "-b:a", "128k", "-shortest", str(tmp)]
     proc = subprocess.run(cmd, capture_output=True)
     if tmp.exists() and tmp.stat().st_size > 0:
         os.replace(tmp, out_path)
@@ -267,6 +276,7 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
     stopped_head = 0.0
     stop = threading.Event()
     wav_path = out_path.with_suffix(".audio.wav")
+    t_audio0 = time.time()              # wav starts here — trimmed in mux
     audio = threading.Thread(target=capture_loopback,
                              args=(stop, wav_path), daemon=True)
     audio.start()
@@ -347,11 +357,20 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
                                              else (0.0, 0.0, 0.0, -1.0))
     if pan:
         drive.send(handle, {"action": "camera", "x": pan_x0, "y": pan_y0})
+    # wall-clock glide: the old version interpolated from game-time rows
+    # (1 Hz) -> ~6 discrete camera jumps = stutter. Wall-driven at 30 Hz
+    # (handleCommands drains all pending msgs every engine Update) the
+    # steps are small -> visually smooth.
+    pan_wall = max(0.3, (pan_until - pan_from_t) / 1.7)
+    pan_t0 = None
+    pan_done = pan is None
     last_pan = 0.0
 
     t_cur = 0.0
     last_advance = time.time()
     frames = 0
+    t_vid0 = None                       # wall time of first/last frame
+    t_vid1 = None
     frame_interval = 1.0 / fps
     next_frame = time.time()
     with __import__("mss").mss() as sct:
@@ -362,15 +381,20 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
                 if t and t > t_cur:
                     t_cur = t
                     last_advance = time.time()
-            if pan and t_cur < pan_until and time.time() - last_pan > 0.5:
-                # glide the camera while the gap's game time flows;
-                # SetCameraPosition is accepted while running (verified)
-                span = max(0.1, pan_until - pan_from_t)
-                f = min(1.0, max(0.0, (t_cur - pan_from_t) / span))
+            if not pan_done and time.time() - last_pan >= 0.033:
+                now = time.time()
+                if pan_t0 is None:
+                    pan_t0 = now
+                f = (now - pan_t0) / pan_wall
+                if t_cur >= pan_until:
+                    f = 1.0             # window reached: snap to target
+                f = min(1.0, max(0.0, f))
                 drive.send(handle, {"action": "camera",
                                     "x": round(pan_x0 + (x - pan_x0) * f, 2),
                                     "y": round(pan_y0 + (y - pan_y0) * f, 2)})
-                last_pan = time.time()
+                last_pan = now
+                if f >= 1.0:
+                    pan_done = True
             if time.time() - last_advance > STALL_S:
                 log(f"record: time stalled at t={t_cur:.0f} (replay may "
                     f"have ended); stopping segment early")
@@ -384,6 +408,9 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
                 next_frame = time.time()
             img = np.array(sct.grab(mon))
             writer.write(cv2.cvtColor(img, cv2.COLOR_BGRA2BGR))
+            if t_vid0 is None:
+                t_vid0 = time.time()
+            t_vid1 = time.time()
             frames += 1
             sleep = next_frame - time.time()
             if sleep > 0:
@@ -399,8 +426,11 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
         out_path.with_suffix(".audio.wav").unlink(missing_ok=True)
         return stopped_head, frames
     log(f"segment {out_path.name}: {frames} frames, done t={t_cur:.1f}")
-    if mux_queue is not None:
-        mux_queue.append((out_path, wav_path))
+    if mux_queue is not None and t_vid0 is not None:
+        # trim the wav to the video's exact wall span (armed early, joined
+        # late — otherwise the tail is a frozen frame over trailing audio)
+        mux_queue.append((out_path, wav_path, t_vid0 - t_audio0,
+                          t_vid1 - t_vid0))
     return stopped_head, frames
 
 
@@ -558,8 +588,9 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
             handle, seg, pb, pa, out_path, fps,
             max_t=plan.get("replay_length"), pan=pan, mux_queue=mux_queue)
         last_cam = (x, y) if frames >= 10 else None
-    for out_path, wav_path in mux_queue:
-        if mux(out_path, wav_path, out_path):
+    for out_path, wav_path, audio_ss, audio_span in mux_queue:
+        if mux(out_path, wav_path, out_path, audio_ss=audio_ss,
+               audio_span=audio_span):
             log(f"muxed {out_path.name}")
         else:
             log(f"mux FAILED for {out_path.name}; video-only kept")
