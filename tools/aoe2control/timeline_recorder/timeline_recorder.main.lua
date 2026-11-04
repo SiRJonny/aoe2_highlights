@@ -12,8 +12,9 @@
 --             with isHouse flag; other buildings with isHouse=false,
 --             isCastle=true for castle rows, isTC=true for town-center rows)
 --   army_pop  {"time", "counts": {pid: count}}           (1 Hz military census;
---             counts={} + one-time Log warning if no military unit class
---             exists in UnitClass)
+--             sum of combat UnitClasses — INFANTRY, ARCHERY, CAVALRY,
+--             SIEGE_WEAPON and specific combat classes; navy/monks excluded.
+--             counts={} + one-time Log warning if no combat class exists)
 --   unit_death {"time", "id", "player", "x", "y"}        military unit gone
 --             since the previous sample (last known position, +-1 s / +-1 tile;
 --             same gap logic as vill_death)
@@ -52,7 +53,7 @@ local metaSent = false
 local tickCounter = 0
 local villSeen = {}   -- villager id -> last known {x, y, playerId}
 local militarySeen = {} -- military unit id -> last known {x, y, playerId}
-local militaryClass = nil -- UnitClass id for the army census, nil = unknown
+local militaryClasses = {} -- list of UnitClass ids counted as army
 local armyWarned = false
 local tcSeen = {}     -- completed TC/castle id -> {playerId, x, y, kind}
 
@@ -123,35 +124,37 @@ local function countHouseTypes()
     return n
 end
 
-local function findMilitaryClass()
-    -- prefer an explicitly named military class, else scan the enum
-    local names = { "MILITARY", "MILITARY_UNIT", "MILITARY_UNITS", "SOLDIER" }
+local function findMilitaryClasses()
+    -- UnitClass has no MILITARY member (verified via probe_classes): every
+    -- unit belongs to exactly ONE class, so summing all unambiguously
+    -- combat classes cannot double-count. Navy/monks/king excluded.
+    local names = {
+        "INFANTRY", "ARCHERY", "CAVALRY", "SIEGE_WEAPON", "HERO",
+        "PETARD", "SCORPION", "RAIDER", "CAVALRY_RAIDER", "WAR_ELEPHANT",
+        "ELEPHANT_ARCHER", "CAVALRY_ARCHER", "PHALANX", "PIKEMAN",
+        "SPEARMAN", "TWO_HANDED_SWORDSMAN", "SCOUT_CAVALRY",
+    }
+    local out = {}
     for i = 1, #names do
         if UnitClass[names[i]] then
-            return UnitClass[names[i]]
+            table.insert(out, UnitClass[names[i]])
         end
     end
-    for name, value in pairs(UnitClass) do
-        if type(value) == "number"
-            and string.find(string.upper(name), "MILITARY", 1, true) then
-            return value
-        end
-    end
-    return nil
+    return out
 end
 
 function Init()
     IPC.StartServer(PIPE)
     buildHouseTypeSet()
-    militaryClass = findMilitaryClass()
-    if militaryClass then
+    militaryClasses = findMilitaryClasses()
+    if #militaryClasses > 0 then
         Log("timeline_recorder: pipe " .. PIPE .. " started, "
             .. countHouseTypes() .. " house types known, "
-            .. "military class " .. tostring(militaryClass))
+            .. #militaryClasses .. " military classes")
     else
         Log("timeline_recorder: pipe " .. PIPE .. " started, "
             .. countHouseTypes() .. " house types known, "
-            .. "NO military class found (army census disabled)")
+            .. "NO military classes found (army census disabled)")
     end
 end
 
@@ -330,6 +333,34 @@ local function handleCommands()
                 body.error = tostring(err)
             end
             send("probe_result", body)
+        elseif action == "probe_classes" then
+            -- introspection: which UnitClass members exist, which yield
+            -- objects (military class discovery for army_pop)
+            local body = { action = "probe_classes", classes = {} }
+            local ok, err = pcall(function()
+                for name, value in pairs(UnitClass) do
+                    if type(value) == "number" then
+                        table.insert(body.classes, name .. "=" .. value)
+                    end
+                end
+                table.sort(body.classes)
+                local tries = { "MILITARY", "MILITARY_UNIT", "SOLDIER" }
+                for i = 1, #tries do
+                    local v = UnitClass[tries[i]]
+                    if v then
+                        local ok2, st = pcall(function()
+                            return GetObjectStates(GetObjectsByClass(v))
+                        end)
+                        local n = ok2 and st and st.id and #st.id or -1
+                        body["try_" .. tries[i]] = n
+                    end
+                end
+            end)
+            body.ok = ok
+            if not ok then
+                body.error = tostring(err)
+            end
+            send("probe_result", body)
         elseif action == "ping" then
             send("pong", { })
         end
@@ -406,28 +437,29 @@ local function trackBuildings()
 end
 
 local function sampleMilitary()
-    if not militaryClass then
+    if #militaryClasses == 0 then
         if not armyWarned then
             armyWarned = true
             send("army_pop", { counts = {} })
         end
         return
     end
-    local ok, states = pcall(function()
-        return GetObjectStates(GetObjectsByClass(militaryClass))
-    end)
-    if not ok or not states or not states.id then
-        return
-    end
     local counts = {}
     local now = {}
-    for i = 1, #states.playerId do
-        local pid = states.playerId[i]
-        if pid and pid >= 0 then
-            counts[pid] = (counts[pid] or 0) + 1
+    for c = 1, #militaryClasses do
+        local ok, states = pcall(function()
+            return GetObjectStates(GetObjectsByClass(militaryClasses[c]))
+        end)
+        if ok and states and states.id then
+            for i = 1, #states.playerId do
+                local pid = states.playerId[i]
+                if pid and pid >= 0 then
+                    counts[pid] = (counts[pid] or 0) + 1
+                end
+                now[states.id[i]] = { x = states.x[i], y = states.y[i],
+                                      playerId = states.playerId[i] }
+            end
         end
-        now[states.id[i]] = { x = states.x[i], y = states.y[i],
-                              playerId = states.playerId[i] }
     end
     send("army_pop", { counts = counts })
     for id, v in pairs(militarySeen) do
