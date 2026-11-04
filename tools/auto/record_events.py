@@ -247,18 +247,27 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
     def at_end():
         return game.locate_anchor("leave_map_button") is not None
 
-    def running(window_s=2.5):
-        """True once ticks show game time ADVANCING (distinct t values)."""
+    def running(window_s=4.0):
+        """True once module rows show game time ADVANCING.
+
+        Sample rows (vill_pop/stats/...) arrive every 1 game-s (~0.6 wall-s
+        at NORMAL); ticks only every ~10 game-s — too sparse for a short
+        window at NORMAL. Constant-t ticks while paused fail the distinct
+        test, so a frozen game still reads as not-running."""
         seen = -1.0
         end = time.time() + window_s
         while time.time() < end:
             for r in drive.read_now(handle):
-                if r.get("type") == "tick" and r.get("t"):
-                    g = float(r["t"])
-                    if g > seen + 0.01:
-                        if seen >= 0:
-                            return True   # second distinct t: advancing
-                        seen = g
+                g = r.get("time")
+                if not g and r.get("type") == "tick":
+                    g = r.get("t")
+                if not g:
+                    continue
+                g = float(g)
+                if g > seen + 0.5:
+                    if seen >= 0:
+                        return True   # second distinct value: advancing
+                    seen = g
         return False
 
     if at_end():
@@ -286,7 +295,7 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
         drive.read_now(handle)
     if not unpaused:
         game.save_debug("never_unpaused")
-        log("  game time never advanced after F3; skipping segment")
+        log("  no advancing module rows after F3; skipping segment")
         writer.release()
         stop.set()
         audio.join(timeout=5)

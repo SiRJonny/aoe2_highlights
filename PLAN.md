@@ -83,13 +83,16 @@ segment. Recording order = chronological; gaps skipped via seek.
 
 ## Notes
 
-- Engine truth (proved on mp1 takes): while the game is PAUSED the engine
-  IGNORES SetReplaySpeed AND SetCameraPosition, but the module still acks
-  them — ack ≠ applied. The module's Update also DROPS commands right
-  after SetGamePaused for a moment. So all camera/speed commands are set
-  in the seek-settle branch WHILE RUNNING, then the game pauses; the take
-  itself only toggles F3 until game time actually advances (verified by
-  two distinct tick values), never trusting acks.
+- Engine truth (experimentally verified on a live replay, exp_paused.png):
+  module seek with pause=true STOPS the game exactly at the target
+  (clock frozen 00:01:00, camera moved). F3 unpauses at the ENGINE's
+  current speed (chase = FASTEST). set_speed NORMAL sent while the game
+  RUNS applies (measured 1.69 game-s/real-s). Module-issued speed/pause
+  while PAUSED are ignored-but-acked (acks mislead). The seek handler
+  originally DROPPED speedName -> settle left the engine at chase speed
+  -> F3 unpaused into FASTEST -> end-of-file events raced to the end
+  screen. Fixed: handler stores speedName; settle lands NORMAL while
+  still running; take re-sends NORMAL once ticks advance.
 - mp1 end screen freeze: after the replay finishes the module never
   streams again (no F3 recovery observed); takes must not rely on wake.
 - Prio 1/2 window = [first census drop .. min count] inside the winning
