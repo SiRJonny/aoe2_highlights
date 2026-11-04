@@ -281,15 +281,17 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
         audio.join(timeout=5)
         return
 
-    unpaused = False
+    # wake() (record_plan, k>0) can leave the game RUNNING; the no-seek
+    # path depends on it. Pressing F3 then would PAUSE the running game
+    # and the toggle dance would burn ~9 game-s of the window. So test
+    # advancement FIRST and only F3 when actually frozen.
+    unpaused = running(1.5)
     for toggle in range(3):
+        if unpaused or at_end():
+            break
         game.pyautogui.press("f3")       # settle paused it; a failed
         time.sleep(0.4)                  # pause means this pauses first
-        if running():
-            unpaused = True
-            break
-        if at_end():
-            break
+        unpaused = running()
     if unpaused:
         # the settle already landed NORMAL while running (verified
         # engine-side at 1.69x); re-send anyway — harmless if applied,
