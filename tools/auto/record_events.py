@@ -516,12 +516,17 @@ def start_replay(row, search):
 
 def build_plan(events_path, row, plan_path):
     sel_cmd = [sys.executable, str(HERE / "select_events.py"),
-               str(events_path), "--out", str(plan_path), "--row", str(row)]
+               str(events_path), "--out", str(plan_path)]
+    if row is not None:
+        sel_cmd += ["--row", str(row)]
     sel = subprocess.run(sel_cmd, capture_output=True, text=True,
                          encoding="utf-8", errors="replace")
     log(sel.stdout.strip())
     if sel.returncode != 0:
         print(sel.stderr, file=sys.stderr)
+        # the plan file must always exist: downstream (and run_mp) reads it
+        Path(plan_path).write_text(
+            json.dumps({"row": row, "segments": []}), encoding="utf-8")
         return {"row": row, "segments": []}
     return json.loads(plan_path.read_text(encoding="utf-8"))
 
