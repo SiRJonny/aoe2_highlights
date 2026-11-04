@@ -66,7 +66,7 @@ segment. Recording order = chronological; gaps skipped via seek.
       each segment (forward seek), arm capture before unpause, record,
       skip gaps via seek; backward target → `restart` action then chase.
       Reuses `clip_recorder.wait_seek_settled` + WASAPI loopback. Commit.
-- [ ] 7. End-to-end on 5 "MP Replay" games: pick 5 newest `MP Replay *`
+- [x] 7. End-to-end on 5 "MP Replay" games: pick 5 newest `MP Replay *`
       in savegame; per game: utime the original file → `bootstrap_row.py`
       → collect (cross-check `last t` vs mgz SYNC length) → plan → record →
       verify clips (frame counts, AAC audio, frames at event t). Zero-event
@@ -83,7 +83,10 @@ segment. Recording order = chronological; gaps skipped via seek.
       4. [x] `MP Replay @2026.11.01 205106 (2)` (36.3 min): 2/2 resign
              clips (V1gyen @36:09, Katja @36:17 banners, AAC, fog off);
              mgz length exact (2178.6 = 2178.6).
-      5. [ ] `MP Replay @2026.11.01 200634 (2)`
+      5. [x] `MP Replay @2026.11.01 200634 (2)` (66+ min, ~t4000): 65/65
+             clips (~2.4 GB, army_loss-heavy late game + tc_falls + castle
+             falls + resigns); 3 transient skips re-recorded via
+             `--segs 28,37,39` and verified.
 - [ ] 8. Docs: update `docs/replay-format-notes.md` (spectator/fog,
       priority planner, per-game bootstrap, mgz length check) + final
       commit.
