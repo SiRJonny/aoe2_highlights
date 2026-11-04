@@ -243,12 +243,17 @@ One command per game (`tools/auto/run_mp.py --only N`, or per-file via
    chronological output; zero events → no video (valid). Prio 1/2 segment =
    [first census drop .. min count] inside the winning window, not the
    window bounds.
-5. **Record pass** — per segment in time order: chase to `t0 − 10` at
-   `FASTEST` via module seek, settle lands **camera + NORMAL while still
-   running** (see engine truths), pauses; take = F3-till-rows-advance, film
-   30 fps mp4v + WASAPI loopback, mux → `out\clips_<tag>\clip_<tag>_<NN>_<prio>_t<sec>.mp4`.
+5. **Record pass** — per segment in time order; the game NEVER stops
+   moving: seeks send `pause=False` (settle lands camera+NORMAL while
+   running), no F3 pause between takes, wake only for pipe recovery.
+   Close segments (gap ≤ 10 game-s, ≤ 40 tiles) film the gap as a camera
+   PAN to the next tile instead of seek-teleporting. Muxes deferred to
+   plan end so the inter-take gap stays filmed. Take = verify-advancing,
+   film 30 fps mp4v + WASAPI loopback → `out\clips_<tag>\clip_<tag>_<NN>_<prio>_t<sec>.mp4`.
    Fog: `Spectator Mode=true` opens replays in the observer panel; the flow
    clicks `replay_all_visible` after *every* load (fog resets per load).
+   The CONTROL overlay is Shift-closed at pass start (anchor-verified
+   `control_panel` template; toggles only when visible).
 
 Engine truths (each verified experimentally, mp1 debug cycle):
 
@@ -268,6 +273,14 @@ Engine truths (each verified experimentally, mp1 debug cycle):
   toggle dance eats the window.
 - Backward seek target (head already past it): window ahead → skip the seek
   and film onward; window passed → skip the segment.
+- No-pause flow: the game is never parked between takes. Post-take F3
+  pauses froze the module (the whole wake dance existed for that); with
+  `pause=False` seeks the module stays alive and the prelude's
+  running()-check passes instantly. wake() is reserved for pipe recovery.
+- Pan transitions: gap ≤ 10 game-s + ≤ 40 tiles → the gap is FILMED as a
+  camera glide (interpolated `SetCameraPosition` every 0.5 wall-s while
+  game time advances) instead of a seek jump cut; muxes are deferred so
+  the gap is captured.
 - End screen (`FINISHED REPLAYING GAME.`) freezes the module permanently —
   zero pipe rows, no F3 recovery. Guards skip such segments; a <10-frame
   junk take is deleted. Clamp `t1` to `replay_length − 0.5`.
