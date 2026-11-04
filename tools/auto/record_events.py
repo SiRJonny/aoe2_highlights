@@ -216,19 +216,19 @@ def fog_off():
 def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
     """Record one segment: settle left the game paused at seg start.
 
-    Capture is armed FIRST (writer + audio), and only then the game is
-    unpaused with the camera re-issued and speed set to NORMAL: any
-    sleep between unpause and the first captured frame eats the
-    window's opening seconds (the housing is replay speed; at NORMAL
-    every second of setup is 1.7 game seconds lost).
-    max_t: replay length — clamp the stop time so end-of-game segments
-    do not film the FINISHED REPLAYING GAME screen while the stall
-    detector waits."""
+    The seek settle branch lands CAMERA + NORMAL replay speed while the
+    game is still RUNNING (engine-side; the chase proves SetReplaySpeed
+    is accepted then) and pauses only afterwards. So this function only
+    toggles F3 until game time advances and films at NORMAL — no speed
+    command here: sent while paused the engine IGNORES it while the
+    module acks it anyway (that misleading ack cost two takes).
+    max_t: replay length — the stop time is clamped just under it so
+    end-of-game segments never film the FINISHED REPLAYING screen."""
     x, y = int(seg["x"]), int(seg["y"])
     t0p = seg["t0"] - pb
     t1p = seg["t1"] + pa
     if max_t is not None:
-        t1p = min(t1p, max_t)
+        t1p = min(t1p, max_t - 0.5)
     stop = threading.Event()
     wav_path = out_path.with_suffix(".audio.wav")
     audio = threading.Thread(target=capture_loopback,
@@ -243,33 +243,48 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None):
 
     game.focus_window()
     time.sleep(0.3)
-    # The engine IGNORES SetReplaySpeed/SetCameraPosition while the game is
-    # paused (the module still acks them from IPC) and drops them while its
-    # Update is frozen right after SetGamePaused — so:
-    #   1. F3 until ticks flow again (wake loop; a blind F3 can double-toggle)
-    #   2. camera + NORMAL with ack confirmation (retry while unpaused)
-    # A lead-in of 10 game-s before the window (chosen by record_plan)
-    # absorbs the FASTEST preroll before NORMAL lands.
-    speed_ok = False
-    for attempt in range(3):
-        game.pyautogui.press("f3")
-        rows = drive.read_for(handle, 1.5, quiet=True)
-        need_speed = True
-        if not any(r.get("type") == "tick" for r in rows):
-            continue
-        for _ in range(3):
-            drive.send(handle, {"action": "camera", "x": x, "y": y})
-            drive.send(handle, {"action": "set_speed",
-                                "speedName": "NORMAL"})
-            rows = drive.read_for(handle, 2.0, quiet=True)
-            if any(r.get("action") == "set_speed" for r in rows):
-                speed_ok = True
-                need_speed = False
-                break
-        if not need_speed:
+
+    def at_end():
+        return game.locate_anchor("leave_map_button") is not None
+
+    def running(window_s=2.5):
+        """True once ticks show game time ADVANCING (distinct t values)."""
+        seen = -1.0
+        end = time.time() + window_s
+        while time.time() < end:
+            for r in drive.read_now(handle):
+                if r.get("type") == "tick" and r.get("t"):
+                    g = float(r["t"])
+                    if g > seen + 0.01:
+                        if seen >= 0:
+                            return True   # second distinct t: advancing
+                        seen = g
+        return False
+
+    if at_end():
+        game.save_debug("end_before_take")
+        log("  end screen already up before the take; skipping segment")
+        writer.release()
+        stop.set()
+        audio.join(timeout=5)
+        return
+
+    unpaused = False
+    for toggle in range(3):
+        game.pyautogui.press("f3")       # settle paused it; a failed
+        time.sleep(0.4)                  # pause means this pauses first
+        if running():
+            unpaused = True
             break
-    if not speed_ok:
-        log("  WARNING: set_speed never acked; recording anyway")
+        if at_end():
+            break
+    if not unpaused:
+        game.save_debug("never_unpaused")
+        log("  game time never advanced after F3; skipping segment")
+        writer.release()
+        stop.set()
+        audio.join(timeout=5)
+        return
     drive.read_now(handle)              # drain leftovers
 
     t_cur = 0.0
@@ -374,9 +389,9 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         pb = seg.get("pb", pad)
         pa = seg.get("pa", pad)
         t0p = seg["t0"] - pb
-        # lead-in: chase this far BEFORE the window so the FASTEST preroll
-        # (wake + camera + NORMAL landing) burns spare game seconds, not
-        # the window itself; the clip films from the settle point on
+        # lead-in: chase this far BEFORE the window; the clip films from
+        # the settle point on, so the lead is spare footage that absorbs
+        # the ~1-3 game-s between settle and the first captured frame
         LEAD = 10.0
         t_target = max(t0p - LEAD, 1.0)
         x, y = int(seg["x"]), int(seg["y"])
@@ -398,8 +413,10 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         attempt = 0
         while attempt < 2 and not settled:
             attempt += 1
+            drive.read_now(handle)      # stale seek_reached acks must not
             drive.send(handle, {"action": "seek", "t": t_target, "x": x,
-                                "y": y, "pause": True, "camera": True})
+                                "y": y, "pause": True, "camera": True,
+                                "speedName": "NORMAL"})
             res = wait_seek_settled(handle, t_target, max_s=1500,
                                     progress=chase_log,
                                     check_end=replay_over)
@@ -422,6 +439,12 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
                     break
         if not settled:
             log("  seek never settled; skipping segment")
+            continue
+        if game.locate_anchor("leave_map_button") is not None:
+            # settled "True" can still mean the module paused right as the
+            # replay transitioned to the end screen (end-of-file events)
+            game.save_debug("settled_at_end")
+            log("  end screen up after settle; skipping segment")
             continue
         # record_segment unpauses itself (F3 + camera + NORMAL) only
         # after the writer/audio are armed, so the window's opening

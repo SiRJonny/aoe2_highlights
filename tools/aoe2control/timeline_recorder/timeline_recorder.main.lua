@@ -171,6 +171,13 @@ local function runSeek()
         if seek.camera then
             SetCameraPosition(Vector2(seek.x, seek.y))
         end
+        -- land the requested speed while STILL RUNNING: the engine
+        -- ignores SetReplaySpeed while paused (the Python side cannot
+        -- set it after this pause), but here the game runs at chase
+        -- speed and the call is accepted. F3 resumes at this speed.
+        if seek.speedName and ReplaySpeed[seek.speedName] then
+            SetReplaySpeed(ReplaySpeed[seek.speedName])
+        end
         if seek.pause then
             SetGamePaused(true)
         end
