@@ -80,7 +80,9 @@ segment. Recording order = chronological; gaps skipped via seek.
       3. [x] `MP Replay @2026.11.01 211553 (4)` (27.7 min): 8/8 clips
              (4× vill_loss, 2× army_loss, 2× resign). Seg 7 needed the
              no-seek onward-film path + running()-first prelude.
-      4. [ ] `MP Replay @2026.11.01 205106 (2)`
+      4. [x] `MP Replay @2026.11.01 205106 (2)` (36.3 min): 2/2 resign
+             clips (V1gyen @36:09, Katja @36:17 banners, AAC, fog off);
+             mgz length exact (2178.6 = 2178.6).
       5. [ ] `MP Replay @2026.11.01 200634 (2)`
 - [ ] 8. Docs: update `docs/replay-format-notes.md` (spectator/fog,
       priority planner, per-game bootstrap, mgz length check) + final
