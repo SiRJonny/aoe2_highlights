@@ -37,8 +37,16 @@ STEAM_EXE = r"C:\Program Files (x86)\Steam\steam.exe"
 STEAM_APPID = "813780"
 
 
-def touch_target(row):
-    """Same profile rule as record_events: pre-made hl<N> replay copy."""
+def touch_target(row, file_path=None):
+    """Explicit file path, or the profile rule: pre-made hl<N> copy."""
+    if file_path:
+        import os
+        p = Path(file_path)
+        if not p.exists():
+            sys.exit(f"target replay missing: {p}")
+        os.utime(p)
+        print(f"touched {p}", flush=True)
+        return p
     cand = Path.home() / "Games" / "Age of Empires 2 DE"
     for d in cand.glob("*/savegame"):
         hit = d / f"hl{row} replay copy.aoe2record"
@@ -122,12 +130,17 @@ t0 = time.time()
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--row", type=int, required=True)
+    ap.add_argument("--row", type=int, default=None)
+    ap.add_argument("--file", default=None,
+                    help="explicit replay file to touch newest (instead of "
+                         "the hl<N> profile copy)")
     ap.add_argument("--noreboot", action="store_true",
                     help="touch + inject only (boot order already right)")
     args = ap.parse_args()
 
-    touch_target(args.row)
+    if args.row is None and args.file is None:
+        sys.exit("need --row N or --file <replay>")
+    touch_target(args.row, args.file)
     if not args.noreboot:
         kill_game()
         launch_game()

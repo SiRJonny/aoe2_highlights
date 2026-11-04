@@ -51,7 +51,7 @@ segment. Recording order = chronological; gaps skipped via seek.
       `probe_replay.py` pattern) → `resign {time, player}` rows merged into
       the events jsonl after collect. Position resolved at plan time from
       that player's last `bld_event lost` / `unit_death`. Commit.
-- [ ] 4. `select_events.py` v2 priority planner: events jsonl + mgz length →
+- [x] 4. `select_events.py` v2 priority planner: events jsonl + mgz length →
       ordered plan. Census-based sliding 15 s windows for prio 1/2 (baseline
       = census at window start; ≥10% vill / ≥20% army loss), destroyed TC /
       castle from `bld_event lost`, resign from step 3, prio 7 from
@@ -62,7 +62,7 @@ segment. Recording order = chronological; gaps skipped via seek.
 - [x] 5. Bootstrap fix: drop premature module-pipe verify in
       `bootstrap_row.py` (CONTROL pipe check is enough at main menu);
       commit.
-- [ ] 6. Record driver v2: run a whole plan in one replay load — chase to
+- [x] 6. Record driver v2: run a whole plan in one replay load — chase to
       each segment (forward seek), arm capture before unpause, record,
       skip gaps via seek; backward target → `restart` action then chase.
       Reuses `clip_recorder.wait_seek_settled` + WASAPI loopback. Commit.
@@ -77,6 +77,12 @@ segment. Recording order = chronological; gaps skipped via seek.
 
 ## Notes
 
+- Priorities: 1 = highest (user list order). solve_overlaps keeps segments
+  in (prio, t0) order: candidates overlapping a KEPT lower-number/higher
+  segment are dropped, same-prio overlaps merge.
+- Prio 1/2 windows: NOT the sliding window bounds — the segment is
+  [first census drop .. min count] inside the winning window (test data
+  refined this; staircase decline fixtures).
 - Prio 5 in the original request was a duplicate of prio 3 (user: typo,
   removed). Prio numbers keep their given values (1,2,3,4,6,7).
 - Fog: `Spectator Mode=true` makes replays open in the observer panel
