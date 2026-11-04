@@ -324,6 +324,7 @@ def test_resign_team_last():
     assert last1 and last1[0]["t0"] == 1010, p6
     # focus: densest bucket of team-7 deaths in [1000, 1010] = (50.5, 50.5)
     assert abs(last1[0]["x"] - 50.5) < 0.01, last1[0]
+    assert last1[0]["info"]["team_pids"] == [1, 2]
     p3 = [c for c in p6 if c["info"]["player"] == 3]
     assert p3 and p3[0]["x"] == 200 and p3[0]["y"] == 200, p3
     print("ok test_resign_team_last")

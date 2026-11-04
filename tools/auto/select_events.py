@@ -469,8 +469,12 @@ def build_candidates(rows):
         by_team = {}
         for t, pid in resigns:
             by_team.setdefault(teams.get(pid), []).append((t, pid))
-        groups = [(team, [p for _, p in members], max(members))
-                  for team, members in by_team.items()]
+        groups = []
+        for team, members in by_team.items():
+            # the focus covers the WHOLE team's deaths, not only the
+            # resigning members'
+            roster = sorted(p for p, tid in teams.items() if tid == team)
+            groups.append((team, roster, max(members)))
     else:
         # no teams row: cluster consecutive resigns (a team defeat is a
         # burst of resigns; a solo quit stands alone)
@@ -514,7 +518,8 @@ def build_candidates(rows):
                       "info": {"player": last_pid,
                                "team": team,
                                "team_pids": sorted(pids),
-                               "resigns": len(pids)}})
+                               "resigned": len([1 for rt, rp in resigns
+                                                if rp in pids])}})
 
     # prio 7: castle/Krepost built within 20 tiles of an enemy TC — the
     # camera focuses the MIDPOINT between the castle and the nearest
