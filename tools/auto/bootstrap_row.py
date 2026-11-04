@@ -26,7 +26,7 @@ HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "aoe2control"))
 
-import drive  # noqa: E402
+import drive  # noqa: E402  (used by collect/record after replay load)
 import pipeline  # noqa: E402  (guarded main; inject() reused)
 
 import win32gui  # noqa: E402
@@ -111,11 +111,11 @@ def inject_and_verify():
         time.sleep(20)
     else:
         sys.exit("CONTROL never injected")
-    print("waiting for module pipe ...", flush=True)
-    handle = drive.connect(180)
-    rows = drive.read_for(handle, 5, quiet=True)
-    print("pipe alive, first rows:", [r.get("type") for r in rows],
-          flush=True)
+    # NOTE: the module pipe (AoE2_Highlights) only exists once a replay is
+    # LOADED, not at the main menu — verifying it here always fails. The
+    # collect/record pass connects after start_replay instead.
+    print("bootstrap done: CONTROL pipe up "
+          f"({time.time() - t0:.0f}s since start)", flush=True)
 
 
 t0 = time.time()
