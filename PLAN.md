@@ -71,6 +71,12 @@ segment. Recording order = chronological; gaps skipped via seek.
       → collect (cross-check `last t` vs mgz SYNC length) → plan → record →
       verify clips (frame counts, AAC audio, frames at event t). Zero-event
       game: log "no events, no video". Commit per game.
+      Games (newest-first, distinct matches — sizes dedupe copies):
+      1. `MP Replay @2026.11.02 190017 (4)` (5.8 min — zero-event canary)
+      2. `MP Replay @2026.11.02 183902 (2)` (28.3 min, = hl2 match)
+      3. `MP Replay @2026.11.01 211553 (4)`
+      4. `MP Replay @2026.11.01 205106 (2)`
+      5. `MP Replay @2026.11.01 200634 (2)`
 - [ ] 8. Docs: update `docs/replay-format-notes.md` (spectator/fog,
       priority planner, per-game bootstrap, mgz length check) + final
       commit.
