@@ -10,7 +10,15 @@
 --             per player index 1..n (age: 0=Dark..3=Imperial, PlayerAttribute ids)
 --   bld_*     building lifecycle rows (house_start / house_done / house_lost
 --             with isHouse flag; other buildings with isHouse=false,
---             isCastle=true for castle rows)
+--             isCastle=true for castle rows, isTC=true for town-center rows)
+--   army_pop  {"time", "counts": {pid: count}}           (1 Hz military census;
+--             counts={} + one-time Log warning if no military unit class
+--             exists in UnitClass)
+--   unit_death {"time", "id", "player", "x", "y"}        military unit gone
+--             since the previous sample (last known position, +-1 s / +-1 tile;
+--             same gap logic as vill_death)
+--   bld_event lost rows are also emitted for COMPLETED town centers and
+--             castles vanishing (destruction), not just foundations
 --   tick      debug telemetry every 10 updates
 --
 -- Building lifecycle from Player:GetFoundations() (unfinished buildings are
@@ -43,6 +51,10 @@ local lastT = nil
 local metaSent = false
 local tickCounter = 0
 local villSeen = {}   -- villager id -> last known {x, y, playerId}
+local militarySeen = {} -- military unit id -> last known {x, y, playerId}
+local militaryClass = nil -- UnitClass id for the army census, nil = unknown
+local armyWarned = false
+local tcSeen = {}     -- completed TC/castle id -> {playerId, x, y, kind}
 
 local houseTypes = {}     -- [unitType id] = true, built from UnitObjectType names
 local typeNames = {}      -- [unitType id] = name, filled with house ids at load
@@ -52,6 +64,11 @@ local seek = nil          -- {"t": number, "x": number, "y": number,
 
 local function isHouseType(ot)
     return houseTypes[ot] or false
+end
+
+local function isTCType(ot)
+    local n = typeNames[ot]
+    return n ~= nil and string.sub(n, 1, 11) == "TOWN_CENTER"
 end
 
 local function buildHouseTypeSet()
@@ -106,11 +123,36 @@ local function countHouseTypes()
     return n
 end
 
+local function findMilitaryClass()
+    -- prefer an explicitly named military class, else scan the enum
+    local names = { "MILITARY", "MILITARY_UNIT", "MILITARY_UNITS", "SOLDIER" }
+    for i = 1, #names do
+        if UnitClass[names[i]] then
+            return UnitClass[names[i]]
+        end
+    end
+    for name, value in pairs(UnitClass) do
+        if type(value) == "number"
+            and string.find(string.upper(name), "MILITARY", 1, true) then
+            return value
+        end
+    end
+    return nil
+end
+
 function Init()
     IPC.StartServer(PIPE)
     buildHouseTypeSet()
-    Log("timeline_recorder: pipe " .. PIPE .. " started, "
-        .. countHouseTypes() .. " house types known")
+    militaryClass = findMilitaryClass()
+    if militaryClass then
+        Log("timeline_recorder: pipe " .. PIPE .. " started, "
+            .. countHouseTypes() .. " house types known, "
+            .. "military class " .. tostring(militaryClass))
+    else
+        Log("timeline_recorder: pipe " .. PIPE .. " started, "
+            .. countHouseTypes() .. " house types known, "
+            .. "NO military class found (army census disabled)")
+    end
 end
 
 local function runSeek()
@@ -321,6 +363,7 @@ local function trackBuildings()
             send("bld_event", {
                 event = "start",
                 isHouse = isHouseType(f.unitType),
+                isTC = isTCType(f.unitType),
                 isCastle = n and string.find(n, "CASTLE", 1, true) and true or false,
                 name = typeNames[f.unitType],
                 id = id, unitType = f.unitType, owner = f.playerId,
@@ -338,6 +381,7 @@ local function trackBuildings()
                 send("bld_event", {
                     event = "done",
                     isHouse = isHouseType(f.unitType),
+                    isTC = isTCType(f.unitType),
                     isCastle = typeNames[f.unitType]
                         and string.find(typeNames[f.unitType], "CASTLE",
                                         1, true) and true or false,
@@ -349,6 +393,7 @@ local function trackBuildings()
                 send("bld_event", {
                     event = "lost",
                     isHouse = isHouseType(f.unitType),
+                    isTC = isTCType(f.unitType),
                     name = typeNames[f.unitType],
                     id = id, unitType = f.unitType, owner = f.playerId,
                     x = f.x, y = f.y,
@@ -358,6 +403,89 @@ local function trackBuildings()
     end
 
     foundations = seen
+end
+
+local function sampleMilitary()
+    if not militaryClass then
+        if not armyWarned then
+            armyWarned = true
+            send("army_pop", { counts = {} })
+        end
+        return
+    end
+    local ok, states = pcall(function()
+        return GetObjectStates(GetObjectsByClass(militaryClass))
+    end)
+    if not ok or not states or not states.id then
+        return
+    end
+    local counts = {}
+    local now = {}
+    for i = 1, #states.playerId do
+        local pid = states.playerId[i]
+        if pid and pid >= 0 then
+            counts[pid] = (counts[pid] or 0) + 1
+        end
+        now[states.id[i]] = { x = states.x[i], y = states.y[i],
+                              playerId = states.playerId[i] }
+    end
+    send("army_pop", { counts = counts })
+    for id, v in pairs(militarySeen) do
+        if not now[id] then
+            send("unit_death", { id = id, player = v.playerId,
+                                 x = v.x, y = v.y })
+        end
+    end
+    militarySeen = now
+end
+
+local function trackKeyBuildings()
+    -- completed town centers and castles: disappearance = destroyed
+    local seen = {}
+    local count = GetPlayerCount()
+    for i = 0, count - 1 do
+        local p = GetPlayerById(i)
+        if p then
+            local ok, list = pcall(p.GetTownCenters, p)
+            if ok and list then
+                local states = GetObjectStates(list)
+                for j = 1, #states.id do
+                    seen[states.id[j]] = { playerId = states.playerId[j],
+                                           x = states.x[j], y = states.y[j],
+                                           kind = "TOWN_CENTER" }
+                end
+            end
+        end
+    end
+    if UnitObjectType.CASTLE then
+        local ok, states = pcall(function()
+            return GetObjectStates(GetObjectsByType(UnitObjectType.CASTLE))
+        end)
+        if ok and states and states.id then
+            for j = 1, #states.id do
+                if seen[states.id[j]] == nil then
+                    seen[states.id[j]] = { playerId = states.playerId[j],
+                                           x = states.x[j], y = states.y[j],
+                                           kind = "CASTLE" }
+                end
+            end
+        end
+    end
+
+    for id, f in pairs(tcSeen) do
+        if not seen[id] then
+            send("bld_event", {
+                event = "lost",
+                isHouse = false,
+                isTC = f.kind == "TOWN_CENTER",
+                isCastle = f.kind == "CASTLE",
+                name = f.kind,
+                id = id, owner = f.playerId,
+                x = f.x, y = f.y,
+            })
+        end
+    end
+    tcSeen = seen
 end
 
 local function sampleStats()
@@ -415,6 +543,8 @@ local function sample()
 
     sampleStats()
     trackBuildings()
+    sampleMilitary()
+    trackKeyBuildings()
 end
 
 function Update()
@@ -426,6 +556,8 @@ function Update()
         nextSampleTime = 0
         foundations = {}
         villSeen = {}
+        militarySeen = {}
+        tcSeen = {}
     end
     lastT = t
 
