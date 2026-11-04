@@ -62,7 +62,10 @@ def load_events(path):
 
 
 def census_series(rows, rtype):
-    """Per-player {pid: [(t, count), ...]} from vill_pop/army_pop rows."""
+    """Per-player {pid: [(t, count), ...]} from vill_pop/army_pop rows.
+
+    counts arrives either as {pid: n} or as an array (Lua numeric keys ->
+    JSON array, position 0 = player 1; module playerIds are 1-based)."""
     series = {}
     for r in rows:
         if r.get("type") != rtype or "counts" not in r:
@@ -70,7 +73,12 @@ def census_series(rows, rtype):
         t = r.get("time")
         if t is None:
             continue
-        for k, v in r["counts"].items():
+        counts = r["counts"]
+        if isinstance(counts, list):
+            items = ((i + 1, v) for i, v in enumerate(counts))
+        else:
+            items = counts.items()
+        for k, v in items:
             pid = int(k)
             series.setdefault(pid, []).append((t, v))
     for pid in series:
