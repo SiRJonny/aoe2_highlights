@@ -28,6 +28,12 @@ end-to-end on 5 "MP Replay" games. Zero-event games produce no video.
 | 4 | Castle falling | t−3 … t+4 (pads not user-specified — tunable constant) |
 | 6 | resign/defeated: clip where their last building fell or last unit died | t−4 … t+2 |
 | 7 | castle built (completed) within 20 tiles of an enemy TC | t−15 … t+5 (tunable) |
+| 8 | villager killed by an animal (wolf/boar/bear/...) | t−2 … t+3 (tunable; bottom prio, added later) |
+
+Prio 8 attribution is module-side (kill attribution is engine-simulated,
+not in the replay file): when a villager dies, the module reports any
+gaia-owned aggressive animal within ~3 tiles of the last-known position
+as `by_animal` on the `vill_death` row.
 
 Overlap rule: when windows overlap, keep the highest-priority one and drop
 the lower entirely (never trim). Same-priority overlaps merge into one
