@@ -123,6 +123,13 @@ segment. Recording order = chronological; gaps skipped via seek.
 - Priorities: 1 = highest (user list order). solve_overlaps keeps segments
   in (prio, t0) order: candidates overlapping a KEPT lower-number/higher
   segment are dropped, same-prio overlaps merge.
+- Kill attribution: the replay file has none (engine-simulated), and the
+  module API exposes no killer id. vill_death rows carry a HEURISTIC
+  attribution from the 1 Hz census: by_player = nearest enemy combat unit
+  within ~5 tiles, by_bld = nearest enemy TC/castle/tower in range,
+  by_animal = nearest gaia animal within ~3 tiles. All three may coexist;
+  absence = no suspect (fire ship, decay, trap). Verified: mp5 wild-boar
+  kill at t=3305 attributed with the animal 3 tiles from the death.
 - Prio 1/2 windows: NOT the sliding window bounds — the segment is
   [first census drop .. min count] inside the winning window (test data
   refined this; staircase decline fixtures).
