@@ -46,12 +46,12 @@ def parse_resigns(replay_path):
                     })
             elif opname == "POSTGAME":
                 break
-    return resigns
+    return resigns, total_ms / 1000.0
 
 
 def main():
     replay_path, events_path = sys.argv[1], sys.argv[2]
-    resigns = parse_resigns(replay_path)
+    resigns, length_s = parse_resigns(replay_path)
 
     existing = set()
     lines = []
@@ -60,13 +60,18 @@ def main():
                 encoding="utf-8").splitlines():
             if not line.strip():
                 continue
-            lines.append(line)
             try:
                 row = json.loads(line)
             except json.JSONDecodeError:
+                lines.append(line)
                 continue
             if row.get("type") == "resign":
                 existing.add((round(row["time"], 3), row.get("player")))
+                lines.append(line)
+            elif row.get("type") == "replay_length":
+                continue            # re-computed below
+            else:
+                lines.append(line)
 
     added = 0
     for r in resigns:
@@ -77,13 +82,12 @@ def main():
             lines.append(json.dumps({"type": "resign", "time": r["time"],
                                      "player": r["player"]}))
             added += 1
+    lines.append(json.dumps({"type": "replay_length", "time": length_s}))
 
     Path(events_path).write_text(
         "\n".join(lines) + "\n", encoding="utf-8")
-    print(f"resigns in replay: {len(resigns)}, appended: {added} -> "
-          f"{events_path}")
-    for r in resigns:
-        print(f"  resign t={r['time']:.1f} player {r['player']}")
+    print(f"resigns in replay: {len(resigns)}, appended: {added}, "
+          f"length {length_s:.1f}s -> {events_path}")
 
 
 if __name__ == "__main__":

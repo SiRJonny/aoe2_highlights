@@ -35,19 +35,19 @@ segment. Recording order = chronological; gaps skipped via seek.
 
 ## Steps
 
-- [ ] 1. Fog off via Spectator Mode: set `Spectator Mode=true` in
+- [x] 1. Fog off via Spectator Mode: set `Spectator Mode=true` in
       `tools/aoe2control/settings.timeline.ini` (keep `Modules See
       Everything=true`), swap settings on the running game (Delete
       force-inject + `pipeline.inject()`), load a replay, verify fog-free
       render via frame dump + module still streams. Fallback if UI/module
       breaks: document and record from involved player's view instead.
-- [ ] 2. Module v3 — army events: add military-unit census (`army_pop`,
+- [x] 2. Module v3 — army events: add military-unit census (`army_pop`,
       per-player counts, UnitClass.MILITARY or equivalent class set) and
       `unit_death {time,id,player,x,y}` for military units (same
       last-known-position gap logic as `vill_death`); tag `bld_event` lost
       rows with `isTC` (name prefix TOWN_CENTER) and `isCastle` (already
       there). No behavior change to existing rows. Commit.
-- [ ] 3. Resign/defeat annotation: offline mgz action parse (extend the
+- [x] 3. Resign/defeat annotation: offline mgz action parse (extend the
       `probe_replay.py` pattern) → `resign {time, player}` rows merged into
       the events jsonl after collect. Position resolved at plan time from
       that player's last `bld_event lost` / `unit_death`. Commit.
@@ -59,7 +59,7 @@ segment. Recording order = chronological; gaps skipped via seek.
       isTC, tile distance ≤ 20, different owner). Empty plan is valid.
       Unit test with a synthetic events fixture covering overlap
       drop/merge + zero-event case. Commit.
-- [ ] 5. Bootstrap fix: drop premature module-pipe verify in
+- [x] 5. Bootstrap fix: drop premature module-pipe verify in
       `bootstrap_row.py` (CONTROL pipe check is enough at main menu);
       commit.
 - [ ] 6. Record driver v2: run a whole plan in one replay load — chase to
@@ -79,6 +79,13 @@ segment. Recording order = chronological; gaps skipped via seek.
 
 - Prio 5 in the original request was a duplicate of prio 3 (user: typo,
   removed). Prio numbers keep their given values (1,2,3,4,6,7).
+- Fog: `Spectator Mode=true` makes replays open in the observer panel
+  (View Lock / Fog of War / All Visible checkboxes + score panel). Fog is
+  ON again at every replay load → the record flow must click the
+  `replay_all_visible` anchor after each load (frame-verified).
+- `UnitClass` has no MILITARY member (dumped via module `probe_classes`):
+  army census sums combat classes (INFANTRY/ARCHERY/CAVALRY/SIEGE_WEAPON/
+  HERO/...); one class per unit so sums never double-count.
 - Army loss baseline subtlety: census at window start can already be
   post-loss; sliding 15 s windows step 1 game s so the max-loss window is
   found regardless.

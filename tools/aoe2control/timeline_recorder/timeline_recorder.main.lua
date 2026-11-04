@@ -20,6 +20,9 @@
 --             same gap logic as vill_death)
 --   bld_event lost rows are also emitted for COMPLETED town centers and
 --             castles vanishing (destruction), not just foundations
+--   tc_snap   {"owner", "x", "y", "kind"}               one-time snapshot of
+--             every completed town center / castle at the first sample
+--             (starting TCs have no build events; prio-7 planner needs them)
 --   tick      debug telemetry every 10 updates
 --
 -- Building lifecycle from Player:GetFoundations() (unfinished buildings are
@@ -56,6 +59,7 @@ local militarySeen = {} -- military unit id -> last known {x, y, playerId}
 local militaryClasses = {} -- list of UnitClass ids counted as army
 local armyWarned = false
 local tcSeen = {}     -- completed TC/castle id -> {playerId, x, y, kind}
+local snapSent = false
 
 local houseTypes = {}     -- [unitType id] = true, built from UnitObjectType names
 local typeNames = {}      -- [unitType id] = name, filled with house ids at load
@@ -577,6 +581,13 @@ local function sample()
     trackBuildings()
     sampleMilitary()
     trackKeyBuildings()
+    if not snapSent then
+        snapSent = true
+        for _, f in pairs(tcSeen) do
+            send("tc_snap", { owner = f.playerId, x = f.x, y = f.y,
+                              kind = f.kind })
+        end
+    end
 end
 
 function Update()
@@ -590,6 +601,7 @@ function Update()
         villSeen = {}
         militarySeen = {}
         tcSeen = {}
+        snapSent = false
     end
     lastT = t
 
