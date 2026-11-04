@@ -187,7 +187,33 @@ def mux(video_path, wav_path, out_path):
 # --- pass 2: record --------------------------------------------------
 
 
-def record_segment(handle, seg, pad, out_path, fps):
+def fog_off():
+    """Disable fog in the spectator replay panel (Spectator Mode=true).
+
+    Fog is ON at every replay load. Detector: the minimap area goes dark
+    under fog (calibrated: 73% dark pixels with fog vs 27% without).
+    Clicks the 'All Visible' checkbox only when needed."""
+    import cv2
+    m = game._mon()
+    mm = game.dump_screen()[900 - m["top"]:1060 - m["top"],
+                            1630 - m["left"]:1910 - m["left"]]
+    dark = (mm.mean(axis=2) < 60).mean() * 100
+    if dark < 50:
+        log(f"fog already off (minimap dark {dark:.0f}%)")
+        return
+    hit = game.locate_anchor("replay_all_visible", threshold=0.80)
+    if not hit:
+        game.save_debug("fail_all_visible_anchor")
+        log("WARNING: All Visible anchor not found; recording with fog")
+        return
+    game.focus_window()
+    time.sleep(0.3)
+    game.press_click(hit[0], hit[1])
+    time.sleep(2)
+    log(f"fog off clicked (was {dark:.0f}% dark)")
+
+
+def record_segment(handle, seg, pb, pa, out_path, fps):
     """Record one segment: settle left the game paused at seg start.
 
     Capture is armed FIRST (writer + audio), and only then the game is
@@ -196,7 +222,8 @@ def record_segment(handle, seg, pad, out_path, fps):
     window's opening seconds (the housing is replay speed; at NORMAL
     every second of setup is 1.7 game seconds lost)."""
     x, y = int(seg["x"]), int(seg["y"])
-    t1p = seg["t1"] + pad
+    t0p = seg["t0"] - pb
+    t1p = seg["t1"] + pa
     stop = threading.Event()
     wav_path = out_path.with_suffix(".audio.wav")
     audio = threading.Thread(target=capture_loopback,
@@ -302,6 +329,7 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         acks = [r.get("action") for r in drive.read_for(handle, 3,
                                                         quiet=True)]
         log(f"speed ack: {acks or 'NONE (pipe dead?)'}")
+        fog_off()
     for k, seg in enumerate(segs):
         if reuse or k > 0:
             # after each take the game sits paused and the frozen
@@ -310,13 +338,16 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
                 log("  module never unfroze; skipping segment")
                 continue
         idx_plan = next(j + 1 for j, s in enumerate(all_segs) if s is seg)
-        t0p = seg["t0"] - pad
+        pb = seg.get("pb", pad)
+        pa = seg.get("pa", pad)
+        t0p = seg["t0"] - pb
         x, y = int(seg["x"]), int(seg["y"])
-        name = (f"clip_row{plan.get('row', '?')}_{idx_plan:02d}_"
+        tag = plan.get("tag") or f"row{plan.get('row', '?')}"
+        name = (f"clip_{tag}_{idx_plan:02d}_"
                 f"{seg['kind']}_t{int(seg['t0'])}.mp4")
         out_path = out_dir / name
         log(f"segment {k + 1}/{len(segs)} {seg['kind']}: "
-            f"t={t0p:.0f}..{seg['t1'] + pad:.0f} tile {x}:{y}")
+            f"t={t0p:.0f}..{seg['t1'] + pa:.0f} tile {x}:{y}")
 
         def chase_log(t, t0p=t0p):
             log(f"  chase {t:.0f}/{t0p:.0f}" if t >= 0
@@ -357,16 +388,20 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         # record_segment unpauses itself (F3 + camera + NORMAL) only
         # after the writer/audio are armed, so the window's opening
         # game seconds cannot be eaten by setup latency
-        record_segment(handle, seg, pad, out_path, fps)
+        record_segment(handle, seg, pb, pa, out_path, fps)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--row", type=int, required=True,
+    ap.add_argument("--row", type=int, default=None,
                     help="which replay profile to run (1-9); resolves to a "
                          "touch/copy file ('hl<N> replay copy.aoe2record') "
                          "that is stamped newest so the UI loads it as "
                          "list row 1")
+    ap.add_argument("--tag", default=None,
+                    help="game-agnostic run tag (e.g. mp1); overrides --row "
+                         "for events/plan/clip naming; with --touch + "
+                         "--search the target replay is arbitrary")
     ap.add_argument("--search", default=None)
     ap.add_argument("--collect", action="store_true")
     ap.add_argument("--record", action="store_true")
@@ -393,7 +428,10 @@ def main():
     do_collect = args.collect or not (args.collect or args.record)
     do_record = args.record or not (args.collect or args.record)
 
-    tag = f"row{args.row}"
+    if args.tag is None and args.row is None:
+        sys.exit("need --row N (profile mode) or --tag T (arbitrary game "
+                 "mode with --touch)")
+    tag = args.tag or f"row{args.row}"
     events_path = Path(args.events or ROOT / "out" / f"events_{tag}.jsonl")
     plan_path = Path(args.plan or ROOT / "out" / f"events_plan_{tag}.json")
     out_dir = Path(args.out_dir or ROOT / "out" / f"clips_{tag}")
@@ -401,6 +439,8 @@ def main():
     if do_collect:
         log("== pass 1: collect (replay at full speed)")
         if args.touch is None:
+            if args.tag:
+                sys.exit("--tag mode needs an explicit --touch replay path")
             # profiles: pre-made copy 'hl<N> replay copy.aoe2record'
             cand = Path.home() / "Games" / "Age of Empires 2 DE"
             for d in cand.glob("*/savegame"):
@@ -443,6 +483,7 @@ def main():
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
 
     if do_record and plan.get("segments"):
+        plan["tag"] = tag
         log("== pass 2: record segments (replay at normal speed)")
         segs = [int(x) for x in args.segs.split(",")] if args.segs else None
         if args.reuse:
