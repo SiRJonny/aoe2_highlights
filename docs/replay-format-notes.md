@@ -219,3 +219,56 @@ replay session, ReadFile without pending data blocks (Peek first).
 
 Decision recorded: highlights are generated "data-first" (parse → timestamp →
 record), not by watching pixels.
+
+## Priority highlight pipeline (MP replays, 2026-11 v2)
+
+One command per game (`tools/auto/run_mp.py --only N`, or per-file via
+`bootstrap_row.py --file X.aoe2record` then `record_events.py --tag T --touch X`):
+
+1. **Per-game bootstrap** — the replay list is cached per game boot, so every
+   game needs a restart: `bootstrap_row.py` touches the file (newest mtime →
+   row 1), kills/starts the game, injects CONTROL (`settings.timeline.ini`).
+   Pipe verify must wait for a *loaded replay*, not the main menu.
+2. **Collect pass** — whole replay at `FASTEST` (a 28-min match takes ~90 s);
+   module rows → `out\events_<tag>.jsonl`. End = game time stalled 20 s
+   ("time stalled" means the replay *ended*, expected).
+3. **mgz length cross-check** — `annotate_resigns.py` sums the file's
+   `SYNC`-millis → true replay length; collect's `last t` must match
+   (mp3: 1659.3 = 1659.3). Resign ops from mgz are appended as events with
+   positions resolved at plan time (last building fell / last unit died).
+4. **Priority planner** (`select_events.py` v2, unit-tested): 1 = lose ≥10%
+   villagers in 15 s, 2 = lose ≥20% army in 15 s, 3 = TC falling, 4 = castle
+   falling, 6 = resign/defeat, 7 = castle completed within 20 tiles of an
+   enemy TC. Highest prio wins overlaps entirely; same prio merges;
+   chronological output; zero events → no video (valid). Prio 1/2 segment =
+   [first census drop .. min count] inside the winning window, not the
+   window bounds.
+5. **Record pass** — per segment in time order: chase to `t0 − 10` at
+   `FASTEST` via module seek, settle lands **camera + NORMAL while still
+   running** (see engine truths), pauses; take = F3-till-rows-advance, film
+   30 fps mp4v + WASAPI loopback, mux → `out\clips_<tag>\clip_<tag>_<NN>_<prio>_t<sec>.mp4`.
+   Fog: `Spectator Mode=true` opens replays in the observer panel; the flow
+   clicks `replay_all_visible` after *every* load (fog resets per load).
+
+Engine truths (each verified experimentally, mp1 debug cycle):
+
+- Module seek with `pause=true` stops the game **exactly** at the target
+  (clock frozen, camera moved). A seek-less replay plays through and still
+  crosses the target — trust the seek receipt ack, not just `t ≥ target`.
+- The engine **ignores `SetReplaySpeed`/`SetCameraPosition` while paused**
+  but the module still acks them (ack ≠ applied). The seek handler must
+  store `speedName` and the settle branch must apply it while running.
+- `set_speed NORMAL` sent while the game runs applies (measured
+  1.69 game-s/real-s). F3 unpauses at the engine's *current* speed — if the
+  settle left FASTEST, end-of-file events race into the end screen.
+- Ticks arrive every ~10 game-s; sample rows every 1 game-s (~0.6 wall-s at
+  NORMAL). Advancement guards must read sample rows.
+- `wake()` (F3-till-ticks) ends unpaused → the take prelude must test
+  advancement *before* pressing F3, else it pauses a running game and the
+  toggle dance eats the window.
+- Backward seek target (head already past it): window ahead → skip the seek
+  and film onward; window passed → skip the segment.
+- End screen (`FINISHED REPLAYING GAME.`) freezes the module permanently —
+  zero pipe rows, no F3 recovery. Guards skip such segments; a <10-frame
+  junk take is deleted. Clamp `t1` to `replay_length − 0.5`.
+- Junk-clip hygiene: takes < 10 frames are removed with their `.audio.wav`.
