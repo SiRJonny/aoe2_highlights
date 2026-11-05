@@ -404,9 +404,14 @@ local function handleCommands()
             send("ack", { action = "seek", t = seek.t })
         elseif action == "map_mode" then
             mapMode = msg.on ~= false
-            -- (re)send meta: the map client may attach mid-replay and
-            -- would otherwise never see players/map size/type names
+            -- (re)send meta + tc snapshots: the map client may attach
+            -- mid-replay and would otherwise never see players, map
+            -- size, type names or the starting TCs/castles
             sendMeta()
+            for _, f in pairs(tcSeen) do
+                send("tc_snap", { owner = f.playerId, x = f.x, y = f.y,
+                                  kind = f.kind })
+            end
             send("ack", { action = action, on = mapMode })
         elseif action == "camera" and msg.x then
             SetCameraPosition(Vector2(msg.x, msg.y))

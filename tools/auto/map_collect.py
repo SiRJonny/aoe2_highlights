@@ -66,10 +66,10 @@ def main():
     if not capture.wait_first_tick(handle, 150):
         capture.log("WARNING: module never streamed ticks; pipe may be dead")
 
-    # objects rows on (+ meta re-sent, so a late attach still sees the
-    # players / map size / type names)
+    # objects rows on. NO pre-read: the module answers map_mode by
+    # re-sending meta + tc_snap, and those rows are DATA (the acks are
+    # skipped inside the collector by type).
     drive.send(handle, {"action": "map_mode", "on": True})
-    drive.read_for(handle, 3, quiet=True)
 
     tag_dir = paths.tag_dir(args.tag)
     pos_path = tag_dir / "positions.jsonl"
