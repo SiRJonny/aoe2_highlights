@@ -521,6 +521,15 @@ def reload_session(tag_row=1):
     return h
 
 
+def _is_muxed(path):
+    """True when the mp4 already carries the muxed audio stream."""
+    import subprocess
+    import imageio_ffmpeg
+    pr = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), "-i", str(path)],
+                        capture_output=True, text=True)
+    return any("Audio:" in l for l in pr.stderr.splitlines())
+
+
 def record_grid(handle, seg, out_dir, fps, mux_queue, idx_plan, tag,
                 max_t=None):
     """Nomad first-TC grid: one take PER PLAYER over the SAME game-time
@@ -528,9 +537,40 @@ def record_grid(handle, seg, out_dir, fps, mux_queue, idx_plan, tag,
     time, so EVERY take (the first included) starts from a fresh paused
     reload. The camera is STATIONARY on that player's TC site from the
     start: the villagers walk into frame and build. Returns the
-    (possibly reconnected) handle."""
+    (possibly reconnected) handle.
+
+    Crash-resume: a part whose final mp4 is already muxed is skipped;
+    a part with a survived raw video + audio wav is requeued for its
+    deferred mux; junk (no wav) is deleted and re-recorded."""
+    import cv2
     players = seg["info"]["players"]
     for k, pl in enumerate(players):
+        out_path = out_dir / (f"clip_{tag}_{idx_plan:02d}_first_tc_grid_"
+                              f"p{k}_t{int(seg['t0'])}.mp4")
+        wav_path = out_path.with_suffix(".audio.wav")
+        if out_path.exists():
+            if _is_muxed(out_path):
+                log(f"grid part {k + 1}/{len(players)}: already muxed; "
+                    "skipping")
+                continue
+            if wav_path.exists():
+                span = wav_path.stat().st_size / (48000 * 2 * 2)  # s
+                nfr = cv2.VideoCapture(str(out_path)).get(
+                    cv2.CAP_PROP_FRAME_COUNT)
+                if span > 15 and nfr > 300:
+                    # raw take + audio survived the crash: requeue the
+                    # deferred mux (audio trimmed at the video start;
+                    # the real-time re-stamp uses frames/wall-s)
+                    mux_queue.append((out_path, wav_path, 0.0, span,
+                                      int(nfr),
+                                      seg.get("speedMult", 1.0)))
+                    log(f"grid part {k + 1}/{len(players)}: raw take "
+                        f"survived ({int(nfr)} frames); requeued mux")
+                    continue
+            log(f"grid part {k + 1}/{len(players)}: junk from a killed "
+                "run; deleting")
+            out_path.unlink(missing_ok=True)
+            wav_path.unlink(missing_ok=True)
         handle = reload_session()
         if handle is None:
             log("  grid: reload failed; stopping grid takes")
@@ -539,8 +579,6 @@ def record_grid(handle, seg, out_dir, fps, mux_queue, idx_plan, tag,
         pseg["x"] = int(pl["tc_x"])
         pseg["y"] = int(pl["tc_y"])
         pseg["info"] = dict(seg["info"])
-        out_path = out_dir / (f"clip_{tag}_{idx_plan:02d}_first_tc_grid_"
-                              f"p{k}_t{int(seg['t0'])}.mp4")
         log(f"grid part {k + 1}/{len(players)}: player {pl['pid']} "
             f"TC site {pseg['x']}:{pseg['y']}")
         _, frames = record_segment(
