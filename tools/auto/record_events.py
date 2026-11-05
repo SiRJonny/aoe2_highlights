@@ -46,20 +46,6 @@ from clip_recorder import wait_seek_settled  # noqa: E402
 STALL_S = 20.0         # no module time advance -> pass/segment ends
 PAN_MAX_GAP = 20.0     # max game-s between takes for a pan transition
 PAN_MAX_TILES = 40.0   # max tile distance for a pan transition
-
-# --mask-hud: paint the fixed game-UI regions black before writing a
-# frame (AoE2 DE has no hide-HUD mode; the regions below cover the top
-# resource bar, the production-queue icon strip, the bottom HUD strip,
-# the observer score panel, the fog-of-war tooltip and the
-# population-limit banner — verified against 1080p frames)
-MASK_REGIONS = (
-    (0, 56, 0, 1920),        # top resource bar
-    (56, 105, 0, 470),       # production queue icons (top-left)
-    (900, 1080, 0, 1920),    # bottom HUD strip
-    (675, 900, 1430, 1920),  # observer score panel
-    (830, 900, 0, 575),      # fog-of-war tooltip
-    (855, 900, 840, 1320),   # population-limit banner
-)
 FFMPEG = None          # resolved lazily (imageio_ffmpeg)
 
 
@@ -279,7 +265,7 @@ def fog_off():
 
 
 def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
-                   pan=None, mux_queue=None, mask_hud=False):
+                   pan=None, mux_queue=None):
     """Record one segment. The game is NEVER paused around takes.
 
     The seek settle branch lands CAMERA + NORMAL replay speed while the
@@ -429,9 +415,6 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
             if next_frame < time.time():
                 next_frame = time.time()
             img = np.array(sct.grab(mon))
-            if mask_hud:
-                for y0, y1, x0, x1 in MASK_REGIONS:
-                    img[y0:y1, x0:x1] = 0
             writer.write(cv2.cvtColor(img, cv2.COLOR_BGRA2BGR))
             if t_vid0 is None:
                 t_vid0 = time.time()
@@ -492,8 +475,7 @@ def wait_first_tick(handle, timeout_s=120):
     return False
 
 
-def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False,
-                mask_hud=False):
+def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
     all_segs = plan["segments"]
     if not all_segs:
         log("plan has no segments; nothing to record")
@@ -622,8 +604,7 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False,
                 continue
         t_cur_last, frames = record_segment(
             handle, seg, pb, pa, out_path, fps,
-            max_t=plan.get("replay_length"), pan=pan, mux_queue=mux_queue,
-            mask_hud=mask_hud)
+            max_t=plan.get("replay_length"), pan=pan, mux_queue=mux_queue)
         last_cam = (x, y) if frames >= 10 else None
     for out_path, wav_path, audio_ss, audio_span, frames, mult in mux_queue:
         if mux(out_path, wav_path, out_path, audio_ss=audio_ss,
@@ -665,11 +646,6 @@ def main():
                     help="record pass: keep the running session instead of "
                          "restarting the replay (wards off the seek-never-"
                          "retry flow for missed segments)")
-    ap.add_argument("--mask-hud", action="store_true",
-                    help="record pass: paint the fixed game-UI regions "
-                         "(top bar, bottom HUD, score panel, tooltips) "
-                         "black in every frame - only world graphics "
-                         "remain; AoE2 DE has no hide-HUD mode")
     args = ap.parse_args()
 
     do_collect = args.collect or not (args.collect or args.record)
@@ -752,7 +728,7 @@ def main():
                     "dead (state screenshot will show)")
                 game.save_debug("warning_pipe_no_tick")
         record_plan(handle, plan, out_dir, args.fps, segs=segs,
-                    reuse=args.reuse, mask_hud=args.mask_hud)
+                    reuse=args.reuse)
 
 
 def start_replay(row, search):

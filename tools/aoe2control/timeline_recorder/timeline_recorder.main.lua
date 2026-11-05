@@ -57,6 +57,8 @@
 
 local PIPE = "AoE2_Highlights"
 local SAMPLE_INTERVAL = 1.0
+local VILL_POS_WINDOW_S = 150.0   -- stream villager positions while the
+                                  -- game is young (nomad first-TC phase)
 
 local nextSampleTime = 0
 local lastT = nil
@@ -495,6 +497,22 @@ local function handleCommands()
                 body.error = tostring(err)
             end
             send("probe_result", body)
+        elseif action == "object_pos" then
+            -- live position of one object (the nomad first-TC builder
+            -- villager that the record flow's camera follows)
+            local oid = tonumber(msg.id)
+            local ok, res = pcall(function()
+                local obj = GetObjectById(oid)
+                if not obj then
+                    return nil
+                end
+                local p = obj:GetPosition()
+                return { x = p.x, y = p.y, z = p.z }
+            end)
+            send("ack", { action = "object_pos", id = oid,
+                          ok = ok,
+                          pos = res,
+                          err = ok and nil or tostring(res) })
         elseif action == "probe_env" then
             -- introspection: every global the injector exposes (docs
             -- list the API, but the runtime may have undocumented
@@ -788,6 +806,39 @@ local function sample()
         end
     end
     villSeen = now
+
+    -- nomad window: stream every villager position while the game is
+    -- young (nomad maps start TC-less with 3 villagers per player, so
+    -- this is light) — the planner uses it to pick each player's
+    -- first-TC builder and the record flow follows that villager
+    local gt = GetGameTime()
+    if gt and gt < VILL_POS_WINDOW_S then
+        local pos = {}
+        for id, v in pairs(now) do
+            table.insert(pos, { id = id, player = v.playerId,
+                                x = v.x, y = v.y })
+        end
+        send("vill_pos", { positions = pos })
+    end
+
+    -- TC foundations under construction: who is building (villagers
+    -- within 2 tiles)? The planner picks the FIRST builder per player;
+    -- the record flow follows them via the object_pos action.
+    for id, f in pairs(foundations) do
+        if isTCType(f.unitType) then
+            local builders = {}
+            for vid, v in pairs(now) do
+                if v.playerId == f.playerId
+                        and math.abs(v.x - f.x) <= 2.0
+                        and math.abs(v.y - f.y) <= 2.0 then
+                    table.insert(builders, vid)
+                end
+            end
+            table.sort(builders)
+            send("tc_build", { id = id, owner = f.playerId,
+                               x = f.x, y = f.y, builders = builders })
+        end
+    end
 
     sampleStats()
     trackBuildings()
