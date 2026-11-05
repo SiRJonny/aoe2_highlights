@@ -67,7 +67,11 @@ RESIGN_FOCUS_S = 10.0  # look this far back for the resign focus
 FOCUS_BUCKET = 5.0     # tile bucket size for the densest-death focus
 RESIGN_CLUSTER_S = 180.0  # fallback team detection without a teams row
 CASTLE_BUILD_SAFE_S = 30.0  # deaths-free span checked before start
-PRIO_CASTLE_BUILD = 5  # the vacated slot; user may renumber
+PRIO_CASTLE_BUILD = 5  # the vacated slot; now used by the nomad grid
+CASTLE_BUILD_ENABLED = False   # safe-castle recordings disabled for now
+PRIO_FIRST_TC_GRID = 5         # nomad first-TC grid (same free slot)
+FIRST_TC_TAIL_S = 4.0          # film this long past the last TC done
+NOMAD_MAP_PAT = ("nomad", "migration")
 PRIO_EXTEND = 9        # battle extension: lowest, yields to everything
 
 PADS = {               # per priority (pb, pa) in game seconds
@@ -444,26 +448,94 @@ def build_candidates(rows):
     for r in rows:
         if r.get("type") == "bld_event" and r.get("event") == "done":
             dones_by_id.setdefault(r.get("id"), r)
-    for r in rows:
-        if r.get("type") != "bld_event" or r.get("event") != "start" \
-                or not is_castle_row(r) or r.get("time") is None:
-            continue
-        done = dones_by_id.get(r.get("id"))
-        if not done or done.get("time") is None \
-                or done["time"] < r["time"]:
-            continue        # never completed (or stale id reuse)
-        t0, t1 = r["time"], done["time"]
-        if feed_nearby(feed, t0 - CASTLE_BUILD_SAFE_S, t1,
-                       r["x"], r["y"]):
-            continue        # contested ground: not a safe build
-        # FAST = 6.76x (measured ladder): the user-chosen construction
-        # speedup; the take settles at FAST and plays wall-real
-        cands.append({"kind": "castle_build", "prio": PRIO_CASTLE_BUILD,
-                      "t0": t0, "t1": t1,
-                      "x": r["x"], "y": r["y"], "speedName": "FAST",
-                      "info": {"owner": r.get("owner"),
-                               "name": r.get("name"),
-                               "safe": True}})
+    if CASTLE_BUILD_ENABLED:
+        for r in rows:
+            if r.get("type") != "bld_event" or r.get("event") != "start" \
+                    or not is_castle_row(r) or r.get("time") is None:
+                continue
+            done = dones_by_id.get(r.get("id"))
+            if not done or done.get("time") is None \
+                    or done["time"] < r["time"]:
+                continue        # never completed (or stale id reuse)
+            t0, t1 = r["time"], done["time"]
+            if feed_nearby(feed, t0 - CASTLE_BUILD_SAFE_S, t1,
+                           r["x"], r["y"]):
+                continue        # contested ground: not a safe build
+            # FAST = 6.76x (measured ladder): the user-chosen construction
+            # speedup; the take settles at FAST and plays wall-real
+            cands.append({"kind": "castle_build", "prio": PRIO_CASTLE_BUILD,
+                          "t0": t0, "t1": t1,
+                          "x": r["x"], "y": r["y"], "speedName": "FAST",
+                          "info": {"owner": r.get("owner"),
+                                   "name": r.get("name"),
+                                   "safe": True}})
+
+    # prio 5 (nomad maps): the first-TC grid. Nomad maps start TC-less;
+    # every player walks their villagers to a spot and builds. ONE grid
+    # segment covers the whole phase (game start -> last TC done +
+    # FIRST_TC_TAIL_S): the record flow films it once PER PLAYER (fresh
+    # replay reload each time — the takes share the same game-time span,
+    # so they composite into a grid: 2x2 for 4 players, 3x3 for 6/8 with
+    # an enlarged minimap cell), at FAST.
+    map_name = next((r.get("name", "") for r in rows
+                     if r.get("type") == "replay_map"), "")
+    is_nomad = any(p in map_name.lower() for p in NOMAD_MAP_PAT)
+    if is_nomad:
+        roster = set()
+        for r in rows:
+            if r.get("type") == "teams" and isinstance(r.get("teams"), dict):
+                roster = {int(k) for k in r["teams"]}
+                break
+        starts = {}   # pid: first isTC start row
+        dones = {}    # (pid, id): first done row
+        for r in rows:
+            if r.get("type") != "bld_event" or not r.get("isTC"):
+                continue
+            pid = r.get("owner")
+            if r.get("event") == "start":
+                if pid is not None and pid not in starts:
+                    starts[pid] = r
+            elif r.get("event") == "done":
+                key = (pid, r.get("id"))
+                if key not in dones:
+                    dones[key] = r
+        # vill_pos feed for builder selection: per player, the villager
+        # closest to the foundation when it appears
+        vpos = {}
+        for r in rows:
+            if r.get("type") == "vill_pos" and r.get("time") is not None:
+                vpos.setdefault(round(r["time"], 3), []).extend(
+                    r.get("positions") or [])
+        players = []
+        for pid in sorted(roster):
+            st = starts.get(pid)
+            if not st or st.get("time") is None or st.get("x") is None:
+                continue        # no TC built (died before building one)
+            done = dones.get((pid, st.get("id")))
+            t_done = done["time"] if done and done.get("time") else None
+            if t_done is None:
+                continue
+            best = None
+            for t in sorted(vpos):
+                if t > st["time"]:
+                    break
+                for v in vpos[t]:
+                    if v.get("player") == pid and v.get("x") is not None:
+                        d = abs(v["x"] - st["x"]) + abs(v["y"] - st["y"])
+                        if best is None or d < best[0]:
+                            best = (d, v.get("id"))
+            players.append({"pid": pid,
+                            "builder_id": best[1] if best else None,
+                            "tc_x": st["x"], "tc_y": st["y"],
+                            "t_start": st["time"], "t_done": t_done})
+        if players:
+            t1 = max(p["t_done"] for p in players) + FIRST_TC_TAIL_S
+            cands.append({"kind": "first_tc_grid", "prio": PRIO_FIRST_TC_GRID,
+                          "t0": 0.0, "t1": t1,
+                          "x": players[0]["tc_x"], "y": players[0]["tc_y"],
+                          "speedName": "FAST",
+                          "info": {"players": players, "nomad": True,
+                                   "map": map_name}})
 
     # prio 6: resign — only the LAST resign of a team fires. Focus = the
     # densest 5-tile bucket of that team's deaths in the last 10 s

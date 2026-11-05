@@ -384,6 +384,12 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
         drive.send(handle, {"action": "pan", "x0": pan_x0, "y0": pan_y0,
                             "x1": x, "y1": y,
                             "seconds": round(pan_until - pan_from_t, 3)})
+    # camera follows a villager (nomad first-TC grid): poll the builder's
+    # live position (module object_pos) once per wall second and tween
+    # the camera over; if the builder died, park on the TC site
+    follow_id = (seg.get("info") or {}).get("follow_id")
+    last_follow = 0.0
+    cam_x, cam_y = float(x), float(y)
 
     t_cur = 0.0
     last_advance = time.time()
@@ -411,6 +417,28 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
                     log("record: replay end screen reached; stopping "
                         "segment")
                     break
+            if follow_id and time.time() - last_follow >= 1.0:
+                last_follow = time.time()
+                drive.send(handle, {"action": "object_pos",
+                                    "id": follow_id})
+                arows = drive.read_for(handle, 0.35, quiet=True)
+                for r in arows:
+                    if r.get("action") != "object_pos":
+                        continue
+                    if r.get("ok") and r.get("pos"):
+                        nx = float(r["pos"]["x"])
+                        ny = float(r["pos"]["y"])
+                        if abs(nx - cam_x) + abs(ny - cam_y) > 0.3:
+                            drive.send(handle, {"action": "pan",
+                                                "x0": cam_x, "y0": cam_y,
+                                                "x1": nx, "y1": ny,
+                                                "seconds": 0.9})
+                            cam_x, cam_y = nx, ny
+                    else:
+                        # builder gone: hold the TC site
+                        drive.send(handle, {"action": "camera",
+                                            "x": x, "y": y})
+                        cam_x, cam_y = float(x), float(y)
             next_frame += frame_interval
             if next_frame < time.time():
                 next_frame = time.time()
@@ -475,6 +503,53 @@ def wait_first_tick(handle, timeout_s=120):
     return False
 
 
+def reload_session(tag_row=1):
+    """Fresh replay load for grid takes: each take covers the SAME game
+    span, so every player after the first needs the replay restarted."""
+    if not start_replay(tag_row, None):
+        log("  WARNING: grid reload UI start reported failure")
+    time.sleep(4)
+    h = drive.connect(120)
+    if not wait_first_tick(h, 150):
+        return None
+    close_control_panel()
+    fog_off()
+    return h
+
+
+def record_grid(handle, seg, out_dir, fps, mux_queue, idx_plan, tag,
+                max_t=None):
+    """Nomad first-TC grid: one take PER PLAYER over the SAME game-time
+    span (game start -> last TC done + tail). The takes overlap in game
+    time, so every player after the first gets a fresh replay reload.
+    The camera follows that player's first-builder villager (module
+    object_pos action, tweened); if the builder dies it parks on the TC
+    site. Returns the (possibly reconnected) handle."""
+    players = seg["info"]["players"]
+    for k, pl in enumerate(players):
+        if k > 0:
+            handle = reload_session()
+            if handle is None:
+                log("  grid: reload failed; stopping grid takes")
+                break
+        pseg = dict(seg)
+        pseg["x"] = int(pl.get("start_x", pl["tc_x"]))
+        pseg["y"] = int(pl.get("start_y", pl["tc_y"]))
+        pseg["info"] = dict(seg["info"], follow_id=pl.get("builder_id"))
+        out_path = out_dir / (f"clip_{tag}_{idx_plan:02d}_first_tc_grid_"
+                              f"p{k}_t{int(seg['t0'])}.mp4")
+        log(f"grid part {k + 1}/{len(players)}: player {pl['pid']} "
+            f"builder {pl.get('builder_id')} start "
+            f"{pseg['x']}:{pseg['y']}")
+        _, frames = record_segment(
+            handle, pseg, seg.get("pb", 2.0), seg.get("pa", 2.0),
+            out_path, fps, max_t=max_t, mux_queue=mux_queue)
+        if frames < 10:
+            log("  grid part produced junk; stopping grid takes")
+            break
+    return handle
+
+
 def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
     all_segs = plan["segments"]
     if not all_segs:
@@ -494,10 +569,20 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
         log(f"speed ack: {acks or 'NONE (pipe dead?)'}")
         fog_off()
     mux_queue = []
+    tag = plan.get("tag") or f"row{plan.get('row', '?')}"
     t_cur_last = None                   # replay head after the last take
     last_cam = None                     # camera tile of the last GOOD take
     close_control_panel()
     for k, seg in enumerate(segs):
+        if seg.get("kind") == "first_tc_grid":
+            # nomad grid: per-player takes with reloads, managed inside
+            handle = record_grid(handle, seg, out_dir, fps, mux_queue,
+                                 next(j + 1 for j, s in enumerate(all_segs)
+                                      if s is seg),
+                                 tag, max_t=plan.get("replay_length"))
+            t_cur_last = None
+            last_cam = None
+            continue
         if reuse:
             # externally managed session: may sit paused/frozen. The
             # normal flow leaves the game RUNNING between takes, so no

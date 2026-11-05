@@ -37,6 +37,13 @@ def parse_teams(replay_path):
     return teams
 
 
+def parse_map_name(replay_path):
+    """The map script filename from the DE header (nomad detection)."""
+    with open(replay_path, "rb") as d:
+        h = fast_header.parse(d)
+    return str((h.get("de") or {}).get("rms_filename") or "")
+
+
 def parse_resigns(replay_path):
     """Returns a sorted list of {time, player} for every RESIGN action."""
     resigns = []
@@ -69,6 +76,7 @@ def main():
     replay_path, events_path = sys.argv[1], sys.argv[2]
     resigns, length_s = parse_resigns(replay_path)
     teams = parse_teams(replay_path)
+    map_name = parse_map_name(replay_path)
 
     existing = set()
     lines = []
@@ -87,6 +95,8 @@ def main():
                 lines.append(line)
             elif row.get("type") == "teams":
                 continue            # re-emitted below
+            elif row.get("type") == "replay_map":
+                continue            # re-emitted below
             elif row.get("type") == "replay_length":
                 continue            # re-computed below
             else:
@@ -103,6 +113,8 @@ def main():
             added += 1
     if teams:
         lines.append(json.dumps({"type": "teams", "teams": teams}))
+    if map_name:
+        lines.append(json.dumps({"type": "replay_map", "name": map_name}))
     lines.append(json.dumps({"type": "replay_length", "time": length_s}))
 
     Path(events_path).write_text(

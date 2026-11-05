@@ -340,8 +340,8 @@ def test_resign_team_last():
 
 
 def test_castle_build_safe():
-    # a castle foundation with no deaths nearby films at FAST (prio 5);
-    # a contested one does not fire
+    # disabled by default (user: off for now); enabled -> a safe castle
+    # films at FAST, contested ground does not fire
     def rows_with(death):
         rows = [{"type": "bld_event", "event": "start", "isTC": False,
                  "isCastle": True, "name": "CASTLE", "id": 50,
@@ -354,13 +354,65 @@ def test_castle_build_safe():
             rows.insert(2, {"type": "unit_death", "time": 1250,
                             "player": 4, "x": 103, "y": 102, "id": 9})
         return rows
-    p5 = [c for c in se.build_candidates(rows_with(False))
-          if c["prio"] == 5]
-    assert len(p5) == 1 and p5[0]["speedName"] == "FAST", p5
-    assert p5[0]["t0"] == 1200 and p5[0]["t1"] == 1260
-    assert not [c for c in se.build_candidates(rows_with(True))
-                if c["prio"] == 5]
+    assert not [c for c in se.build_candidates(rows_with(False))
+                if c["prio"] == 5]          # disabled
+    se.CASTLE_BUILD_ENABLED = True
+    try:
+        p5 = [c for c in se.build_candidates(rows_with(False))
+              if c["prio"] == 5]
+        assert len(p5) == 1 and p5[0]["speedName"] == "FAST", p5
+        assert p5[0]["t0"] == 1200 and p5[0]["t1"] == 1260
+        assert not [c for c in se.build_candidates(rows_with(True))
+                    if c["prio"] == 5]
+    finally:
+        se.CASTLE_BUILD_ENABLED = False
     print("ok test_castle_build_safe")
+
+
+def test_first_tc_grid_nomad():
+    # nomad map: both players build their first TC; ONE grid event with
+    # per-player builders picked from the vill_pos stream
+    rows = [{"type": "replay_map", "name": "Nomad.rms"},
+            {"type": "teams", "teams": {"1": 1, "2": 2}}]
+    # villagers wander (positions at t=5): v11 heads to (60,60)
+    rows.append({"type": "vill_pos", "time": 5, "positions": [
+        {"id": 11, "player": 1, "x": 55, "y": 58},
+        {"id": 12, "player": 1, "x": 20, "y": 20},
+        {"id": 21, "player": 2, "x": 140, "y": 141},
+        {"id": 22, "player": 2, "x": 180, "y": 180}]})
+    rows.append({"type": "vill_pos", "time": 8, "positions": [
+        {"id": 11, "player": 1, "x": 59, "y": 60},
+        {"id": 12, "player": 1, "x": 22, "y": 22},
+        {"id": 21, "player": 2, "x": 141, "y": 140},
+        {"id": 22, "player": 2, "x": 178, "y": 178}]})
+    rows += [{"type": "bld_event", "event": "start", "isTC": True,
+              "isCastle": False, "name": "TOWN_CENTER", "id": 60,
+              "owner": 1, "time": 9, "x": 60, "y": 61},
+             {"type": "bld_event", "event": "start", "isTC": True,
+              "isCastle": False, "name": "TOWN_CENTER", "id": 61,
+              "owner": 2, "time": 12, "x": 140, "y": 139},
+             {"type": "bld_event", "event": "done", "isTC": True,
+              "isCastle": False, "name": "TOWN_CENTER", "id": 60,
+              "owner": 1, "time": 70, "x": 60, "y": 61},
+             {"type": "bld_event", "event": "done", "isTC": True,
+              "isCastle": False, "name": "TOWN_CENTER", "id": 61,
+              "owner": 2, "time": 84, "x": 140, "y": 139},
+             {"type": "replay_length", "time": 2000}]
+    p5 = [c for c in se.build_candidates(rows) if c["prio"] == 5]
+    assert len(p5) == 1, p5
+    g = p5[0]
+    assert g["kind"] == "first_tc_grid" and g["t0"] == 0.0
+    assert g["t1"] == 88.0, g          # 84 + 4
+    assert g["speedName"] == "FAST"
+    pls = {p["pid"]: p for p in g["info"]["players"]}
+    assert set(pls) == {1, 2}
+    assert pls[1]["builder_id"] == 11, pls[1]     # v11 was closest
+    assert pls[2]["builder_id"] == 21, pls[2]
+    assert pls[1]["t_done"] == 70 and pls[2]["t_done"] == 84
+    # non-nomad map: no grid event
+    rows[0] = {"type": "replay_map", "name": "Arabia.rms"}
+    assert not [c for c in se.build_candidates(rows) if c["prio"] == 5]
+    print("ok test_first_tc_grid_nomad")
 
 
 def test_zero_events():
@@ -389,5 +441,6 @@ if __name__ == "__main__":
     test_near_tc_midpoint()
     test_resign_team_last()
     test_castle_build_safe()
+    test_first_tc_grid_nomad()
     test_zero_events()
     print("all select_events tests passed")
