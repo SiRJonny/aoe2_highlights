@@ -33,9 +33,11 @@ the event model; current priorities: 1 vill_loss, 2 army_loss, 3 tc_fall,
 - [x] 7. New event (prio 5, vacant slot) `castle_build`: a castle/Krepost
        foundation whose area is safe (no deaths within 12 tiles from
        30 s before start until done) is filmed from start to done sped
-       up at FAST — not FASTEST. Per-segment `speedName` in the plan;
-       record flow settles + re-sends that speed. Verified live: 19
-       castle_build segments across mp2-mp5.
+       up. The engine speed ladder has NO middle preset (measured:
+       SLOW 0.85 / NORMAL 1.69 / FAST 6.76 / FASTEST 11.46 game-s per
+       wall-s; the Game Speed Multiplier is inert during replays), so
+       the take films at NORMAL and the mux compresses it 3x
+       (itsscale + atempo) — a true middle speedup.
 - [x] 8. castle_near_tc (prio 7) focuses the midpoint tile between the
        castle and the NEAREST enemy TC inside the 20-tile radius.
 - [x] 9. Resign events (prio 6) fire only when the LAST player of a team

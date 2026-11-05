@@ -19,8 +19,9 @@ Priorities:
     3  Town Center falling                                       (t-5 .. t+2)
     4  Castle/Krepost falling                                    (t-3 .. t+6)
     5  castle/Krepost built in a safe area (no deaths within 12 tiles
-       from 30 s before start until done) -> film the construction at
-       FAST (middle speedup)                                    (start..done ±2)
+       from 30 s before start until done) -> film the construction and
+       compress 3x at mux (the engine ladder NORMAL 1.69 / FAST 6.76
+       has no middle)                                           (start..done ±2)
     6  resign: only the LAST resign of a team fires; focus = densest
        5-tile bucket of that team's deaths in the last 10 s     (t-4 .. t+2)
     7  castle/Krepost built within 20 tiles of an enemy TC; camera
