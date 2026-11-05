@@ -495,6 +495,22 @@ local function handleCommands()
                 body.error = tostring(err)
             end
             send("probe_result", body)
+        elseif action == "probe_env" then
+            -- introspection: every global the injector exposes (docs
+            -- list the API, but the runtime may have undocumented
+            -- functions - e.g. anything HUD/UI related)
+            local body = { action = "probe_env", globals = {} }
+            local ok, err = pcall(function()
+                for name, value in pairs(_G) do
+                    table.insert(body.globals, name .. ":" .. type(value))
+                end
+                table.sort(body.globals)
+            end)
+            body.ok = ok
+            if not ok then
+                body.err = tostring(err)
+            end
+            send("ack", body)
         elseif action == "probe_classes" then
             -- introspection: which UnitClass members exist, which yield
             -- objects (military class discovery for army_pop)
