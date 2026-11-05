@@ -120,9 +120,12 @@ def main():
               + "|".join(layout)
               + ":fill=black[v]")
     full = ";".join(fc)
-    cmd += ["-filter_complex", full, "-map", "[v]",
+    # encode as mp4v (matching the per-take clips: the concat step uses
+    # -c copy and cannot mix codecs) and carry the first take's audio
+    cmd += ["-filter_complex", full, "-map", "[v]", "-map", "0:a?",
             "-t", f"{dur:.3f}",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-c:v", "mpeg4", "-q:v", "4",
+            "-c:a", "aac", "-b:a", "128k", "-shortest",
             str(args.out)]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
