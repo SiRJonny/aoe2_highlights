@@ -683,7 +683,23 @@ def build_candidates(rows):
                       "info": {"player": r.get("player"),
                                "animal": name,
                                "provoked": any(p in name for p in PREY)}})
-    return cands
+
+    # collapse repeat building-fall candidates at the same tile FOR THE
+    # same owner: the same TC/castle can fire twice (foundation swap +
+    # completed tracker). Different owners' adjacent buildings are real.
+    deduped = []
+    for c in cands:
+        if c["kind"] in ("tc_fall", "castle_fall"):
+            dup = any(d["kind"] == c["kind"]
+                      and d["info"].get("owner") == c["info"].get("owner")
+                      and abs(d["x"] - c["x"]) <= 1.0
+                      and abs(d["y"] - c["y"]) <= 1.0
+                      and abs(d["t0"] - c["t0"]) <= 30.0
+                      for d in deduped)
+            if dup:
+                continue
+        deduped.append(c)
+    return deduped
 
 
 def overlaps(a, b):
