@@ -505,13 +505,17 @@ def wait_first_tick(handle, timeout_s=120):
 
 def reload_session(tag_row=1):
     """Fresh replay load for grid takes: each take covers the SAME game
-    span, so every player after the first needs the replay restarted."""
+    span, so every player (the first included) gets the replay restarted.
+    The game is PAUSED right after the match starts (single F3 — the
+    leftover replay speed would otherwise eat the phase's opening while
+    the pipeline arms; the fresh load auto-plays at the previous
+    session's speed). The record_segment prelude unpauses."""
     if not start_replay(tag_row, None):
         log("  WARNING: grid reload UI start reported failure")
+    game.focus_window()
+    game.pyautogui.press("f3")          # pause the just-started match
     time.sleep(4)
     h = drive.connect(120)
-    if not wait_first_tick(h, 150):
-        return None
     close_control_panel()
     fog_off()
     return h
@@ -521,26 +525,24 @@ def record_grid(handle, seg, out_dir, fps, mux_queue, idx_plan, tag,
                 max_t=None):
     """Nomad first-TC grid: one take PER PLAYER over the SAME game-time
     span (game start -> last TC done + tail). The takes overlap in game
-    time, so every player after the first gets a fresh replay reload.
-    The camera follows that player's first-builder villager (module
-    object_pos action, tweened); if the builder dies it parks on the TC
-    site. Returns the (possibly reconnected) handle."""
+    time, so EVERY take (the first included) starts from a fresh paused
+    reload. The camera is STATIONARY on that player's TC site from the
+    start: the villagers walk into frame and build. Returns the
+    (possibly reconnected) handle."""
     players = seg["info"]["players"]
     for k, pl in enumerate(players):
-        if k > 0:
-            handle = reload_session()
-            if handle is None:
-                log("  grid: reload failed; stopping grid takes")
-                break
+        handle = reload_session()
+        if handle is None:
+            log("  grid: reload failed; stopping grid takes")
+            break
         pseg = dict(seg)
         pseg["x"] = int(pl["tc_x"])
         pseg["y"] = int(pl["tc_y"])
-        pseg["info"] = dict(seg["info"], follow_id=pl.get("builder_id"))
+        pseg["info"] = dict(seg["info"])
         out_path = out_dir / (f"clip_{tag}_{idx_plan:02d}_first_tc_grid_"
                               f"p{k}_t{int(seg['t0'])}.mp4")
         log(f"grid part {k + 1}/{len(players)}: player {pl['pid']} "
-            f"builder {pl.get('builder_id')} start "
-            f"{pseg['x']}:{pseg['y']}")
+            f"TC site {pseg['x']}:{pseg['y']}")
         _, frames = record_segment(
             handle, pseg, seg.get("pb", 2.0), seg.get("pa", 2.0),
             out_path, fps, max_t=max_t, mux_queue=mux_queue)

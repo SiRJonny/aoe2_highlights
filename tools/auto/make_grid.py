@@ -66,7 +66,9 @@ def main():
     # their last frame (a take that started late freezes on its final
     # frame — the camera parked at the TC site)
     import statistics
-    dur = statistics.median(durations)
+    dur = max(durations)          # cover the FULL phase: slower takes
+    # set the pace; shorter ones get their last frame cloned (they all
+    # span the same game-time window, so this only trims start jitter)
 
     cmd = [ff, "-y"]
     for p in args.inputs:

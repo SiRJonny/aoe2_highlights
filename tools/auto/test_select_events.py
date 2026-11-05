@@ -406,7 +406,7 @@ def test_first_tc_grid_nomad():
     assert len(p5) == 1, p5
     g = p5[0]
     assert g["kind"] == "first_tc_grid" and g["t0"] == 0.0
-    assert g["t1"] == 88.0, g          # 84 + 4
+    assert g["t1"] == 99.0, g          # 84 + 15
     assert g["speedName"] == "FAST"
     pls = {p["pid"]: p for p in g["info"]["players"]}
     assert set(pls) == {1, 2}
