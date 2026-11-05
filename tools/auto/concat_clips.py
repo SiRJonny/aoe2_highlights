@@ -26,6 +26,9 @@ OUT = Path(__file__).resolve().parents[2] / "out"
 
 
 def concat(tag_dir):
+    clips = sorted((tag_dir / "clips").glob("*.mp4"))
+    if not clips:
+        return
     tag = tag_dir.name
     out = OUT / f"highlights_{tag}.mp4"
     lst = tag_dir / "concat.txt"
