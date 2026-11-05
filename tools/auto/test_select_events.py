@@ -7,7 +7,7 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
-import select_events as se
+import aoe2hl.planner as se
 
 
 def vill_pop(t, counts):

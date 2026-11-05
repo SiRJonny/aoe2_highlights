@@ -1,8 +1,41 @@
-# AoE2 DE Replay Format — Investigation Notes
+# AoE2 DE Replay Highlights — Technical Notes
 
-Short summary of what an `.aoe2record` file contains, what can be parsed without
-running the game, and what cannot. Verified against the two test files in
-`replays/` (DE build 101.103.x, save version 68.0).
+Short summary of what an `.aoe2record` file contains, what can be parsed
+without running the game, what cannot, and how the capture pipeline works
+around that. Verified against DE build 101.103.x (save version 68.0).
+
+## Repo layout
+
+    tools/auto/aoe2hl/        the reusable package (see below)
+    tools/auto/*.py           thin CLIs over the package + tests + grid compositor
+    tools/aoe2control/        AoE2Control launch config: settings.timeline.ini,
+                              timeline_recorder (the injected Lua module)
+    anchors/                  1920x1080 UI template crops for gameui
+    replays/                  sample replays
+    out/                      OUTPUT ONLY: highlights_<tag>.mp4 at the root,
+                              one out/<tag>/ folder per replay for intermediates
+                              (events.jsonl, plan.json, clips/, clips/grid_parts/)
+
+### The `aoe2hl` package (`tools/auto/aoe2hl/`)
+
+| module        | role |
+|---------------|------|
+| `paths`       | out-folder layout: `final_path`, `events_path`, `plan_path`, `clips_dir`, `grid_parts_dir`, `tags()` |
+| `gameui`      | window focus, anchor template matching, SendInput clicks, debug screenshots |
+| `pipe`        | named-pipe client for the injected Lua module (send, read_for, connect) |
+| `replays_ui`  | drives the UI from any screen into a loaded replay (`run(row, search)`) |
+| `control`     | headless AoE2Control injection (`inject()`, `control_running()`) |
+| `capture`     | `collect` (stream rows to jsonl), `record_segment` (mss video + WASAPI loopback), `mux` (real-time itsscale), `fog_off`, `close_control_panel`, `wake`, `wait_first_tick`, `wait_seek_settled` |
+| `planner`     | priority event selection → plan.json (`build(events, row, plan_path)`), 18 unit tests |
+| `annotators`  | mgz-based resigns/teams/map + attack-order annotations appended to the event stream |
+| `recorder`    | two-pass orchestration: collect → annotate → plan → record (`main()`, `record_plan`, `record_grid`, `reload_session`) |
+
+The CLIs: `record_events.py` (both passes), `select_events.py` (planner),
+`start_replay.py` (UI), `bootstrap_row.py` (touch + game reboot + inject),
+`run_mp.py` (5-game end-to-end), `make_grid.py` (grid compositor),
+`concat_clips.py` (per-replay concat). A spinoff app (e.g. an artificial map
+animation) imports `aoe2hl.capture/pipe/gameui/replays_ui` directly instead of
+shelling out.
 
 ## How the file works
 
@@ -31,8 +64,8 @@ Sources (do not copy specs locally, link instead):
 
 ## Extractable without running the game
 
-Confirmed working on both test replays with the `mgz` Python parser
-(`pip install mgz`, fast parser, `tools/probe_replay.py` / `probe_actions.py`).
+Confirmed with the `mgz` Python parser (`pip install mgz`, fast parser; used
+by `aoe2hl.annotators`).
 
 **Header (start of game, one snapshot):**
 - Map: id, size, seed, full terrain tile grid (enough to render a minimap image)
@@ -43,25 +76,18 @@ Confirmed working on both test replays with the `mgz` Python parser
 **Body (events, per operation with in-game timestamp `sequence`):**
 - Age advances: `RESEARCH` of age techs (mgz computes `uptimes`)
 - Buildings: `BUILD` (placements with x/y/z), `WALL`, `DELETE` (walls/farms too)
-- Production: `DE_QUEUE` / `MULTIQUEUE` (unit_id + producer object_ids) →
-  villager/military build orders (bug: earlier releases dropped payloads, PR #146)
+- Production: `DE_QUEUE` / `MULTIQUEUE` (unit_id + producer object_ids)
 - Completions/transforms: `DE_TRANSFORM`, `SPECIAL`
 - Military orders: `ORDER`, `MOVE`, `PATROL`, `DE_ATTACK_MOVE`, `STANCE`,
   `FORMATION` (positions + object_ids → can cluster army movements)
 - Economy/transactions: `SELL`/`BUY`, `DE_TRIBUTE`, gather points
 - Player actions: `RESIGN`, `DELETE` (own buildings), `STOP`, town bell,
   autoscout, flare, garrison/ungarrison
-- Camera: `VIEWLOCK` — recorder's viewport position over time (= recorder
-  minimap POV)
+- Camera: `VIEWLOCK` — recorder's viewport position over time
 - `CHAT` — JSON with channel (all/teams), message, platform icon markup
 - Frame stats: `SYNC` per player: obj_count, dp_obj_count, dp_obj_ttl,
   total_res (~1 cadence) — decent out-of-game proxy for score/activity curves
 - `POSTGAME` at end: final ratings/ranks (leaderboards), victory, modes
-
-**Derived, no simulation needed:** opening style, TC/castle placement
-(`BUILD`/`DE_TRANSFORM` to castle ids), age-up timeline, attack-move clusters
-(approximate "battle" hotspots), resign order, chat mining, recorder attention
-(from VIEWLOCK).
 
 ## NOT extractable without running the game
 
@@ -71,51 +97,37 @@ Confirmed working on both test replays with the `mgz` Python parser
   from `POSTGAME` totals only (units_killed/lost per player, no timing).
 - Actual state at time T: unit positions, HP, population, **resources, idle
   TCs, army sizes, field of view of each player**. Requires replaying
-  deterministically inside the real engine or a compatible recreation
-  (openage-grade effort).
-- **Graphics, sound, animations** — no asset data in the replay. Visual
-  reproduction requires the game client (or full sprite atlas extraction +
-  renderer).
+  deterministically inside the real engine or a compatible recreation.
+- **Graphics, sound, animations** — no asset data in the replay.
 - Any player's view except the recorder's.
-- Terrain/object changes mid-game (e.g. trees cut down, converted units):
+- Terrain/object changes mid-game (trees cut down, converted units):
   implied by rules + commands, but only recoverable through engine simulation.
 
 ## Extraction tier 2: run the game (AoE2Control) — verified working
 
 While the game runs (replay/spectate included), **AoE2Control** (https://github.com/aoe2control/AoE2Control,
 v1.1.5, verified against game build 101.103.48987.0) injects a Lua engine into
-the DE process. Modules read real game state (fog-of-war can be disabled with
-the **Modules See Everything** setting) and send JSON through Windows named
-pipes (`IPC.*`) to a Python client. This turns every state we could not get
-from the file alone into a stream:
+the DE process. The `timeline_recorder` module (`tools/aoe2control/`) reads
+real game state (fog-of-war off via **Modules See Everything**) and streams
+JSON rows over the `\\.\pipe\AoE2_Highlights` named pipe to `aoe2hl.pipe`:
 
-- villager population per player (verified: `tools/aoe2control/vill_pop_recorder`,
-  1 sample/s, JSONL → CSV + SVG via `villpop_to_csv.py`)
-- full object snapshots: `GetObjectsPtr()` (id/type/position/owner/alive) →
-  unit positions, army movements, deaths — the battle and castle-fall timelines
-- `GetObjectChanges()` → created/destroyed/damaged per second (kill timing)
-- chat, ratings, tiles, placement queries, paths
+- per-sample census: villager/army population, deaths with last-known x/y
+- building events: TC/castle/Krepost start + done (with builder id)
+- resigns, tick (game time), replay_length, map name, teams
+- engine-side actions: seek (with pause flag + speed), camera, pan tween,
+  set_speed
 
-Setup record (order matters, everything is scriptable with `--headless`):
+Setup (order matters, everything is scriptable with `--headless`):
 
-1. Run the pipe client `pipe_client.py` (waits for the module pipe `AoE2_Highlights`).
-2. `AoE2Control.exe --headless --override-settings tools/aoe2control/settings.villpop.ini
-   --override-module tools/aoe2control/vill_pop_recorder` → status `Ready`.
-3. Start the replay — the module auto-starts at match start (`SyncEnabled=true`).
+1. `bootstrap_row.py --file X.aoe2record` touches the replay (newest mtime →
+   list row 1), reboots the game, injects CONTROL
+   (`AoE2Control.exe --headless --override-settings tools/aoe2control/settings.timeline.ini
+   --override-module tools/aoe2control/timeline_recorder`). The replay list is
+   cached per game boot, so every game needs this restart cycle.
+2. `aoe2hl.replays_ui` drives main menu → Load Game → Replays tab → row 1 →
+   Load Replay. The module auto-starts at match start.
 
-### Automated capture (validated end-to-end)
-
-One command from any postgame/menu screen:
-
-    py -3.12 tools/auto/pipeline.py --row 1 [--search <text>]
-
-Pipeline: skip inject if CONTROL running → start `pipe_client.py` (background,
-writes `out/vill_pop.jsonl`) → `start_replay.py` drives the UI → wait for the
-`done` row → convert to timestamped CSV + SVG
-(`villpop_<date>_<time>.csv/svg`). Validated run: **348 samples, t=0.4–347.4 s
-(full replay, auto-attached at match start), 8 players.**
-
-UI automation facts (all in `tools/auto/game.py` + `start_replay.py`):
+UI automation facts (all in `aoe2hl.gameui` + `aoe2hl.replays_ui`):
 
 - Several game buttons ignore instantaneous synthetic clicks; a raw
   SendInput click with a ~0.12 s hold (`game.press_click`) works everywhere
@@ -130,33 +142,23 @@ UI automation facts (all in `tools/auto/game.py` + `start_replay.py`):
   straight back to the replay list; "FINISHED REPLAYING GAME." screen →
   **Leave Map**. Anchor-based branching on the buttons works for both.
 - Anchor templates are 1920×1080 crops; the game must be maximized/fullscreen.
+- Only list row 1 is supported (row heights vary, hover-scroll breaks
+  detection); copy/touch the wanted replay to make it row 1.
 
 Module lifecycle facts:
 
-- CONTROL exits/loses attach when the game closes a session if idle too
-  long — re-inject (`AoE2Control.exe --headless ...`) and reload after
-  pressing the unload key (`Delete`) in game. Injection while on a menu is
-  reliable; the engine logs `Ready` via stdout.
-- `GetGameTime()` behaviour differs between menu and match; the module must
-  reset its sampling schedule when time goes backwards (match (re)load),
-  otherwise it strands at a huge `nextSampleTime` and silently stops
-  sampling (the `tick` debug rows in `vill_pop_recorder` make this visible).
-- The module's `End()` writes a `done` row with the final game time; the
-  postgame summary's "Time" equals the module's max `time`, so module time is
-  true replay time (the on-screen top bar can differ — cross-check with SYNC
-  ticks when mapping highlights).
-
-Gotchas learned (cost us a full debug cycle):
-
-- Module entry file MUST be named `<module>.main.lua` inside a same-named
-  folder; anything else is silently ignored (0 updates, no pipe).
-- CONTROL keeps settings in memory and rewrites `settings.ini` on start;
-  disk edits are lost unless passed via `--override-settings` at launch.
-- To apply config changes: unload (in-game menu, `Delete`) → relaunch →
-  replay. Attach-time determines timeline coverage; replay start clients
-  sample from the beginning only if attached before match start.
-- Data flow proven across the whole session: 456 samples, 335–790 s,
-  8 players, written live to `out/vill_pop.jsonl`.
+- Injection while on a menu is reliable; the engine logs `Ready` via stdout.
+- `GetGameTime()` behaviour differs between menu and match; the module resets
+  its sampling schedule when time goes backwards (match (re)load), otherwise
+  it strands at a huge `nextSampleTime` and silently stops sampling.
+- Module time is true replay time (the on-screen top bar can differ —
+  cross-check with SYNC ticks when mapping highlights).
+- Same-ID type swap in the foundation tracker (a deleted lot replaced by a new
+  building in one sample) used to double-fire tc_fall/castle_fall; planner
+  dedupes same-owner/same-tile falls in a 30-s window.
+- The collect pipe client attaches ~t=36 of a fresh replay → one-shot start
+  rows are lost; the planner derives the first TC from done/tc_build rows and
+  the builder from tc_build / vill_pos streams.
 
 ## Compatibility notes (current build)
 
@@ -171,79 +173,30 @@ Gotchas learned (cost us a full debug cycle):
 - Format bends per game update — track `mgz` upstream tests
   (`tests/recs/de-*`) rather than duplicating specs.
 
-## Incremental plan toward auto-highlights
-
-## Highlight pipeline (two-pass, 2026-11)
-
-Architecture: **run full replay once at FASTEST to collect the timeline ->
-event jsonl -> select main events -> record the events at NORMAL speed.**
-
-Per replay row (`N` = replay list row):
-
-1. `py -3.12 tools\auto\record_events.py --row N --force-inject`
-   - swap module in (Delete key + headless injector)
-   - pass 1 `collect`: whole replay at `FASTEST`; module rows (minus stats)
-     to `out\events_rowN.jsonl`; ends when game time stalls 20 s (replay end)
-   - `select_events.py` builds `out\events_plan_rowN.json`:
-     earliest *finished* castle -> full-build clip (start..done + pad);
-     top-2 10 s windows of villager deaths in one 12-tile location cell
-   - pass 2 `record`: UI-restarts the replay, then per segment in time
-     order (never seek backwards): F3 -> seek (pause+camera) -> F3 +
-     `set_speed NORMAL` -> monitor-1 mss video (30 fps mp4v) + WASAPI
-     loopback audio (no mic) -> stop on tick >= t1+pad -> F3 pause;
-     ffmpeg mux (imageio-ffmpeg binary) -> `out\clips_rowN\clip_...mp4`
-
-Module rows used: `bld_event` (`isCastle` now), `vill_death` (1 Hz
-villager-id diff; death at last known x/y, +-1 s / +-1 tile), `tick`.
-`vill_death` also fires for fishing ships and never for spawn+death gaps
-inside one sample interval. Castle `done` uses the owner-building-at-tile
-fallback (`UnitClass.BUILDING`) when no completed-type name mapping exists.
-
-Gotchas that stay true: commands hit a paused module never arrive (send
-after F3), `seek` cannot rewind (t < target only), one IPC connection per
-replay session, ReadFile without pending data blocks (Peek first).
-
-
-1. **Parse timeline** — fast parser + PR fixes → normalized JSON per match:
-   ages/builder orders/maps/chat/resigns + activity graph from SYNC.
-2. **Derive highlight candidates** — rule-based scoring over the timeline:
-   concentrated BUILD/attack-move clusters = fights (approximate), castle
-   placements, age-ups, king kills (Regicide), base wipes (DELETEs), unique
-   moments (flares, chat reaction spikes). Output: timestamps; no rendering.
-3. **Render** — the only place the game is needed: launch DE in replay mode on
-   the host machine, seek/demo to parsed timestamps, capture (OBS replay
-   buffer or CaptureAge). Parsed JSON is the trigger layer, video is the
-   capture layer.
-4. **Extras** — token/frame alignment, statistical scores (AoE2Insights-style
-   graphs), storage of parsed timelines.
-
-Decision recorded: highlights are generated "data-first" (parse → timestamp →
-record), not by watching pixels.
-
-## Priority highlight pipeline (MP replays, 2026-11 v3)
+## Highlight pipeline (two-pass, priority planner)
 
 One command per game (`tools/auto/run_mp.py --only N`, or per-file via
 `bootstrap_row.py --file X.aoe2record` then `record_events.py --tag T --touch X`):
 
-1. **Per-game bootstrap** — the replay list is cached per game boot, so every
-   game needs a restart: `bootstrap_row.py` touches the file (newest mtime →
-   row 1), kills/starts the game, injects CONTROL (`settings.timeline.ini`,
-   **Update Interval=0.05** — see engine truths). Pipe verify must wait for a
-   *loaded replay*, not the main menu.
+1. **Per-game bootstrap** — `bootstrap_row.py` (see setup above; inject with
+   `settings.timeline.ini`, **Update Interval=0.05** — see engine truths).
+   Pipe verify must wait for a *loaded replay*, not the main menu.
 2. **Collect pass** — whole replay at `FASTEST` (a 28-min match takes ~90 s);
-   module rows → `out\events_<tag>.jsonl`. End = game time stalled 20 s
-   ("time stalled" means the replay *ended*, expected).
-3. **mgz annotation** — `annotate_resigns.py` sums the file's `SYNC`-millis →
-   true replay length (`last t` must match); appends resign ops **and a
-   `teams` row** (`de.players` `team_id` — authoritative team membership).
-   `annotate_orders.py` appends right-click attack tasks (`ORDER` ops).
-4. **Priority planner** (`select_events.py` v3, 18 unit tests):
+   module rows (minus stats) → `out\<tag>\events.jsonl`. End = game time
+   stalled 20 s ("time stalled" means the replay *ended*, expected).
+3. **mgz annotation** (in-process via `aoe2hl.annotators`) — sums the file's
+   `SYNC`-millis → true replay length (`last t` must match); appends resign
+   ops, a `teams` row (`de.players` `team_id` — authoritative team
+   membership), the `replay_map` row, and right-click attack tasks (`ORDER`
+   ops).
+4. **Priority planner** (`aoe2hl.planner`, 18 unit tests) → `out\<tag>\plan.json`:
    1 = lose ≥10% villagers in 15 s, 2 = lose ≥20% army in 15 s (destroyed
    buildings of that player count as 2 dead units), 3 = TC falling,
-   4 = castle/Krepost falling, 5 = safe castle_build filmed start..done at
-   FAST, 6 = resign (team-last; focus = densest 5-tile bucket of the team's
-   deaths in the last 10 s), 7 = castle built near an enemy TC (camera at
-   the castle↔TC midpoint), 8 = villager killed by an animal,
+   4 = castle/Krepost falling, 5 = nomad first-TC grid (see below;
+   castle_build DISABLED — the flag `CASTLE_BUILD_ENABLED=False` stays in the
+   planner), 6 = resign (team-last; focus = densest 5-tile bucket of the
+   team's deaths in the last 10 s), 7 = castle built near an enemy TC (camera
+   at the castle↔TC midpoint), 8 = villager killed by an animal,
    9 = battle extension (death cascade every ≤2 s within 12 tiles; lowest
    prio, yields to other events, merges into its base). After minute 20 a
    death-based event needs ≥10 deaths. Resigned players are event-dead.
@@ -257,13 +210,31 @@ One command per game (`tools/auto/run_mp.py --only N`, or per-file via
    tween) to the next tile instead of seek-teleporting. Muxes deferred
    to plan end so the inter-take gap stays filmed. Take = verify-
    advancing, film 30 fps mp4v + WASAPI loopback →
-   `out\clips_<tag>\clip_<tag>_<NN>_<prio>_t<sec>.mp4`.
+   `out\<tag>\clips\clip_<tag>_<NN>_<prio>_t<sec>.mp4`.
+   Mux corrects to real time with `-itsscale` (writer fps ≠ capture loop
+   pace; without it long takes play sped-up) + `atempo` audio compression.
    Fog: `Spectator Mode=true` opens replays in the observer panel; the flow
    clicks `replay_all_visible` after *every* load (fog resets per load).
    The CONTROL overlay is Shift-closed at pass start (anchor-verified
    `control_panel` template; toggles only when visible).
+6. **Grid + concat** — `make_grid.py` composites per-player grid takes
+   (max take duration, `tpad` last-frame padding, HUD kept in cells; the old
+   --mask-hud path is gone). `concat_clips.py` concatenates each
+   `out\<tag>\clips\` → `out\highlights_<tag>.mp4` (`-c copy`, no re-encode).
 
-Engine truths (each verified experimentally, mp1 debug cycle):
+### Nomad first-TC grid (prio 5)
+
+Detection: map-name match (nomad/*_ship map scripts) OR gameplay fallback
+(unknown map name + no tc_snap row + TC start rows exist). One segment, prio 5,
+FAST speed, span = game 0 → last TC done + 15 in-game s (`FIRST_TC_TAIL_S=15`).
+Recording: one take PER PLAYER with a fresh paused reload each
+(`reload_session`: UI start, F3 pause right at match start so the opening
+isn't eaten, then seek+arm). Cameras are STATIONARY on each player's TC site
+from game start (villagers walk in; no camera following). Takes land in
+`out\<tag>\clips\grid_parts\`; `make_grid.py` composites 2×2 (4 players) or
+3×3 (6 players: top 6 + bottom-middle minimap; 8 players: minimap last slot).
+
+## Engine truths (each verified experimentally, mp1 debug cycle)
 
 - Module seek with `pause=true` stops the game **exactly** at the target
   (clock frozen, camera moved). A seek-less replay plays through and still
@@ -271,9 +242,10 @@ Engine truths (each verified experimentally, mp1 debug cycle):
 - The engine **ignores `SetReplaySpeed`/`SetCameraPosition` while paused**
   but the module still acks them (ack ≠ applied). The seek handler must
   store `speedName` and the settle branch must apply it while running.
-- `set_speed NORMAL` sent while the game runs applies (measured
-  1.69 game-s/real-s). F3 unpauses at the engine's *current* speed — if the
-  settle left FASTEST, end-of-file events race into the end screen.
+- `set_speed NORMAL` sent while the game runs applies. Speed ladder
+  (game-s/wall-s): SLOW 0.85, NORMAL 1.69, FAST 6.76, FASTEST 11.46.
+- F3 unpauses at the engine's *current* speed — if the settle left FASTEST,
+  end-of-file events race into the end screen.
 - Ticks arrive every ~10 game-s; sample rows every 1 game-s (~0.6 wall-s at
   NORMAL). Advancement guards must read sample rows.
 - `wake()` (F3-till-ticks) ends unpaused → the take prelude must test
@@ -285,7 +257,7 @@ Engine truths (each verified experimentally, mp1 debug cycle):
   pauses froze the module (the whole wake dance existed for that); with
   `pause=False` seeks the module stays alive and the prelude's
   running()-check passes instantly. wake() is reserved for pipe recovery.
-- Pan transitions: gap ≤ 10 game-s + ≤ 40 tiles → the gap is FILMED as a
+- Pan transitions: gap ≤ 20 game-s + ≤ 40 tiles → the gap is FILMED as a
   camera glide instead of a seek jump cut; muxes are deferred so
   the gap is captured.
 - Update cadence was the pan bottleneck: CONTROL runs module `Update()`
@@ -299,5 +271,21 @@ Engine truths (each verified experimentally, mp1 debug cycle):
   glides; pipe-driven sends still coalesce in the IPC pump.
 - End screen (`FINISHED REPLAYING GAME.`) freezes the module permanently —
   zero pipe rows, no F3 recovery. Guards skip such segments; a <10-frame
-  junk take is deleted. Clamp `t1` to `replay_length − 0.5`.
-- Junk-clip hygiene: takes < 10 frames are removed with their `.audio.wav`.
+  junk take is deleted. Clamp `t1` to `replay_length − 0.5`. The very
+  end-of-file resign (~t=3995 in one test game) is therefore unrecordable.
+- PC suspend kills the CONTROL module pipe → full bootstrap (game reboot +
+  inject) required, not a mere reconnect.
+- mss BitBlt capture fails while the monitor is asleep — wake the display
+  before recording.
+- Commands sent to a paused module never arrive (send after F3); `seek`
+  cannot rewind (t < target only); one IPC connection per replay session;
+  ReadFile without pending data blocks (Peek first).
+
+## Out-folder hygiene
+
+`out/` root holds ONLY final videos (`highlights_<tag>.mp4`). Everything else
+an intermediate. The one folder per replay (`out/<tag>/`) is disposable:
+`events.jsonl` + `plan.json` rebuild with a collect pass, clips with a record
+pass. Never park debug screenshots or csv/svg artifacts there (use
+`%TEMP%\opencode`); `gameui.save_debug` writes to `out/auto_debug/`, which is
+scratch and can be wiped any time.

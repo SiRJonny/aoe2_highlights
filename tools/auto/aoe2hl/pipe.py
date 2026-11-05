@@ -1,20 +1,18 @@
 """Send commands to timeline_recorder over the AoE2_Highlights pipe.
 
 Usage:
-    py -3.12 tools\\auto\\drive.py ping
-    py -3.12 tools\\auto\\drive.py seek --t 106 --x 109 --y 117
-    py -3.12 tools\\auto\\drive.py camera --x 109 --y 117
-    py -3.12 tools\\auto\\drive.py pause | unpause | speed --v 3
-    py -3.12 tools\\auto\\drive.py watch --seconds 30   (print rows)
+    py -3.12 -m aoe2hl.pipe ping
+    py -3.12 -m aoe2hl.pipe seek --t 106 --x 109 --y 117
+    py -3.12 -m aoe2hl.pipe camera --x 109 --y 117
+    py -3.12 -m aoe2hl.pipe pause | unpause | speed --v 3
+    py -3.12 -m aoe2hl.pipe watch --seconds 30   (print rows)
 """
 import argparse
 import json
 import sys
 import time
 
-sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
-
-import game
+from aoe2hl import gameui as game
 import pywintypes
 import win32file
 import win32pipe

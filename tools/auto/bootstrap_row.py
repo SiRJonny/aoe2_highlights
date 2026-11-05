@@ -24,10 +24,9 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE.parent / "aoe2control"))
 
-import drive  # noqa: E402  (used by collect/record after replay load)
-import pipeline  # noqa: E402  (guarded main; inject() reused)
+from aoe2hl import control as pipeline  # noqa: E402  (inject reused)
+from aoe2hl import gameui as game  # noqa: E402
 
 import win32gui  # noqa: E402
 
@@ -104,7 +103,6 @@ def wait_window(timeout=300):
 def inject_and_verify():
     # the launcher's own readiness check needs the main menu up; wait for
     # its anchor and then retry injection a few times anyway
-    import game
     if game.wait_anchor("single_player_button", timeout=240):
         print("main menu ready", flush=True)
     for attempt in range(4):

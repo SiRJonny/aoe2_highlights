@@ -14,7 +14,7 @@ is a crop of the game minimap from the first take. Cells keep their HUD
 
 Usage:
     py -3.12 tools\\auto\\make_grid.py --players 8 --out out\\grid.mp4 ^
-        out\\clips_mp5\\clip_mp5_01_first_tc_grid_p0_t0.mp4 [...]
+        out\\mp5\\clips\\grid_parts\\clip_mp5_01_first_tc_grid_p0_t0.mp4 [...]
 """
 import argparse
 import subprocess

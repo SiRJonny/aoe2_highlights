@@ -76,7 +76,7 @@ def main():
         if coll.returncode != 0:
             summary[tag] = "COLLECT FAILED"
             continue
-        plan = json.loads((ROOT / "out" / f"events_plan_{tag}.json")
+        plan = json.loads((ROOT / "out" / tag / "plan.json")
                           .read_text(encoding="utf-8"))
         n = len(plan.get("segments", []))
         if args.collect_only:
@@ -91,7 +91,7 @@ def main():
         if rec.returncode != 0:
             summary[tag] = "RECORD FAILED"
             continue
-        clips = sorted((ROOT / "out" / f"clips_{tag}").glob("*.mp4"))
+        clips = sorted((ROOT / "out" / tag / "clips").glob("*.mp4"))
         sizes = [f"{c.name} {c.stat().st_size // 1024}kB" for c in clips]
         summary[tag] = f"{n} segments -> {len(clips)} clips: {sizes}"
 

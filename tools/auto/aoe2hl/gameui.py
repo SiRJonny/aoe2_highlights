@@ -16,7 +16,7 @@ import pyautogui
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0.05
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 ANCHORS = ROOT / "anchors"
 DEBUG_DIR = ROOT / "out" / "auto_debug"
 
