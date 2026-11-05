@@ -252,9 +252,14 @@ def teams_of(rows):
 
 
 def is_castle_row(r):
-    """Castle OR Krepost (same event category, user rule)."""
-    name = (r.get("name") or "").upper()
-    return bool(r.get("isCastle")) or "KREPOST" in name
+    """Castle OR Krepost (same event category, user rule).
+
+    EXACT name match only: DE type names encode the age
+    (UNIVERSITY_CASTLE_AGE, MONASTERY_CASTLE_AGE_BASE), so a substring
+    match catches monasteries/universities built in the Castle Age.
+    The module's isCastle flag is ignored for the same reason (older
+    collects carry the polluted flag)."""
+    return (r.get("name") or "").upper() in ("CASTLE", "KREPOST")
 
 
 def death_feed(rows, resigned):

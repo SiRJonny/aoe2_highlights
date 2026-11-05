@@ -282,6 +282,15 @@ def test_krepost_is_castle():
             {"type": "replay_length", "time": 1200}]
     p4 = [c for c in se.build_candidates(rows) if c["prio"] == 4]
     assert len(p4) == 1 and p4[0]["info"]["name"] == "KREPOST", p4
+    # age-suffixed university/monastery names are NOT castles
+    rows.append({"type": "bld_event", "event": "lost", "isTC": False,
+                 "isCastle": True, "name": "UNIVERSITY_CASTLE_AGE",
+                 "id": 31, "owner": 5, "time": 950, "x": 75, "y": 85})
+    rows.append({"type": "bld_event", "event": "lost", "isTC": False,
+                 "isCastle": True, "name": "MONASTERY_CASTLE_AGE_BASE",
+                 "id": 32, "owner": 5, "time": 980, "x": 80, "y": 90})
+    p4 = [c for c in se.build_candidates(rows) if c["prio"] == 4]
+    assert len(p4) == 1, p4
     print("ok test_krepost_is_castle")
 
 

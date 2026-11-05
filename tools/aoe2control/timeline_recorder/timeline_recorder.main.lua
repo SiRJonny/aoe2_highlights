@@ -573,8 +573,7 @@ local function trackBuildings()
                 event = "start",
                 isHouse = isHouseType(f.unitType),
                 isTC = isTCType(f.unitType),
-                isCastle = n and (string.find(n, "CASTLE", 1, true)
-                    or string.find(n, "KREPOST", 1, true))
+                isCastle = n and (n == "CASTLE" or n == "KREPOST")
                     and true or false,
                 name = typeNames[f.unitType],
                 id = id, unitType = f.unitType, owner = f.playerId,
@@ -594,10 +593,8 @@ local function trackBuildings()
                     isHouse = isHouseType(f.unitType),
                     isTC = isTCType(f.unitType),
                     isCastle = typeNames[f.unitType]
-                        and (string.find(typeNames[f.unitType], "CASTLE",
-                                         1, true)
-                             or string.find(typeNames[f.unitType], "KREPOST",
-                                            1, true))
+                        and (typeNames[f.unitType] == "CASTLE"
+                             or typeNames[f.unitType] == "KREPOST")
                         and true or false,
                     name = typeNames[f.unitType],
                     id = id, unitType = f.unitType, owner = f.playerId,
