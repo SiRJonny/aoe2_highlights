@@ -234,19 +234,19 @@ def test_battle_extension_and_interrupt():
 
 
 def test_late_gate():
-    # after minute 20, a drop of <10 units does not trigger; >=10 does
-    base = [vill_pop(t, {1: 20}) for t in range(0, 1300, 1)]
-    rows = base + [vill_pop(1250, {1: 19}), vill_pop(1251, {1: 18}),
-                   vill_pop(1252, {1: 17})]
-    rows += [vill_pop(t, {1: 17}) for t in range(1253, 1400, 1)]
-    rows += [{"type": "vill_death", "time": 1250, "player": 1,
+    # after minute 30, a drop of <10 units does not trigger; >=10 does
+    base = [vill_pop(t, {1: 20}) for t in range(0, 1900, 1)]
+    rows = base + [vill_pop(1850, {1: 19}), vill_pop(1851, {1: 18}),
+                   vill_pop(1852, {1: 17})]
+    rows += [vill_pop(t, {1: 17}) for t in range(1853, 2000, 1)]
+    rows += [{"type": "vill_death", "time": 1850, "player": 1,
               "x": 10, "y": 10, "id": 1},
-             {"type": "replay_length", "time": 1500}]
+             {"type": "replay_length", "time": 2100}]
     assert not [c for c in se.build_candidates(rows) if c["prio"] == 1]
-    rows += [vill_pop(1350, {1: 14}), vill_pop(1351, {1: 11}),
-             vill_pop(1352, {1: 7})]
-    rows += [vill_pop(t, {1: 7}) for t in range(1353, 1400, 1)]
-    rows.append({"type": "vill_death", "time": 1351, "player": 1,
+    rows += [vill_pop(1950, {1: 14}), vill_pop(1951, {1: 11}),
+             vill_pop(1952, {1: 7})]
+    rows += [vill_pop(t, {1: 7}) for t in range(1953, 2000, 1)]
+    rows.append({"type": "vill_death", "time": 1951, "player": 1,
                  "x": 11, "y": 11, "id": 2})
     got = [c for c in se.build_candidates(rows) if c["prio"] == 1]
     assert got and got[0]["info"]["lost"] == 10, got

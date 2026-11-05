@@ -34,7 +34,7 @@ Priorities:
 
 Resigned players are event-dead: after a player's resign time their
 deaths, building losses and census drops never trigger or extend
-events. After minute 20 (t > 1200) a death-based event needs >= 10
+events. After minute 30 (t > 1800) a death-based event needs >= 10
 deaths to trigger.
 
 Overlap rule: candidates are kept in priority order; a candidate
@@ -59,7 +59,7 @@ ARMY_LOSS_FRAC = 0.20
 CASTLE_NEAR_TC_TILES = 20.0
 NEARBY_TILES = 12.0    # "nearby area" for extensions + building losses
 EXTEND_GAP = 2.0       # s: deaths at least this often keep a battle going
-LATE_GATE_T = 1200.0   # after minute 20 ...
+LATE_GATE_T = 1800.0   # after minute 30 ...
 LATE_MIN_DEATHS = 10   # ... a death-based event needs >=10 deaths
 BLD_DEATH_WEIGHT = 2   # a destroyed building counts as 2 dead units
 RESIGN_FOCUS_S = 10.0  # look this far back for the resign focus
@@ -339,7 +339,7 @@ def build_candidates(rows):
     feed = death_feed(rows, resigned)
 
     def late_gate(t, deaths):
-        # after minute 20 a death-based event needs >=10 deaths
+        # after minute 30 a death-based event needs >=10 deaths
         return t <= LATE_GATE_T or deaths >= LATE_MIN_DEATHS
 
     # prio 1: villager losses

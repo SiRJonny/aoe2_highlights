@@ -168,7 +168,8 @@ def capture_loopback(stop_evt, wav_path):
             f"-> {wav_path.name}")
 
 
-def mux(video_path, wav_path, out_path, audio_ss=None, audio_span=None):
+def mux(video_path, wav_path, out_path, audio_ss=None, audio_span=None,
+        frames=None):
     global FFMPEG
     if FFMPEG is None:
         import imageio_ffmpeg
@@ -178,7 +179,18 @@ def mux(video_path, wav_path, out_path, audio_ss=None, audio_span=None):
     # is longer on both ends — trim it to the video's wall span and cap
     # the output at the shorter stream (else the tail shows a frozen
     # last frame over trailing audio: a ~2 s "pause" at clip end)
-    cmd = [FFMPEG, "-y", "-i", str(video_path)]
+    cmd = [FFMPEG, "-y"]
+    # real-time correction: the writer stamps frames at a fixed fps, but
+    # the capture loop may fall behind (or burst) — without this, long
+    # takes PLAY SPED-UP (a 57 game-s castle_build clip came out 7 s
+    # long at Normal 1.7). itsscale re-stamps the video onto its true
+    # wall span, no re-encode.
+    if frames is not None and audio_span:
+        nominal = frames / 30.0
+        scale = audio_span / nominal
+        if abs(scale - 1.0) > 0.02:
+            cmd += ["-itsscale", f"{scale:.5f}"]
+    cmd += ["-i", str(video_path)]
     if audio_ss is not None:
         cmd += ["-ss", f"{max(0.0, audio_ss):.3f}"]
         if audio_span is not None:
@@ -375,10 +387,11 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
     frames = 0
     t_vid0 = None                       # wall time of first/last frame
     t_vid1 = None
-    frame_interval = 1.0 / fps
-    next_frame = time.time()
-    with __import__("mss").mss() as sct:
-        mon = sct.monitors[1]
+    last_end_check = 0.0                # anchor check throttled to wall
+    frame_interval = 1.0 / fps          # time: it grabs a SECOND full
+    next_frame = time.time()            # screen and doing it every 15
+    with __import__("mss").mss() as sct:  # frames starved the writer ->
+        mon = sct.monitors[1]           # the mp4 played sped-up
         while t_cur < t1p:
             for r in drive.read_now(handle):
                 t = r.get("time")
@@ -389,10 +402,12 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
                 log(f"record: time stalled at t={t_cur:.0f} (replay may "
                     f"have ended); stopping segment early")
                 break
-            if frames % 15 == 0 and \
-                    game.locate_anchor("leave_map_button") is not None:
-                log("record: replay end screen reached; stopping segment")
-                break
+            if time.time() - last_end_check > 2.0:
+                last_end_check = time.time()
+                if game.locate_anchor("leave_map_button") is not None:
+                    log("record: replay end screen reached; stopping "
+                        "segment")
+                    break
             next_frame += frame_interval
             if next_frame < time.time():
                 next_frame = time.time()
@@ -418,9 +433,11 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
     log(f"segment {out_path.name}: {frames} frames, done t={t_cur:.1f}")
     if mux_queue is not None and t_vid0 is not None:
         # trim the wav to the video's exact wall span (armed early, joined
-        # late — otherwise the tail is a frozen frame over trailing audio)
+        # late — otherwise the tail is a frozen frame over trailing
+        # audio) and tell the mux the true wall span so it can re-stamp
+        # the video to real time (frames/wall-s, not the nominal 30)
         mux_queue.append((out_path, wav_path, t_vid0 - t_audio0,
-                          t_vid1 - t_vid0))
+                          t_vid1 - t_vid0, frames))
     return stopped_head, frames
 
 
@@ -584,9 +601,9 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
             handle, seg, pb, pa, out_path, fps,
             max_t=plan.get("replay_length"), pan=pan, mux_queue=mux_queue)
         last_cam = (x, y) if frames >= 10 else None
-    for out_path, wav_path, audio_ss, audio_span in mux_queue:
+    for out_path, wav_path, audio_ss, audio_span, frames in mux_queue:
         if mux(out_path, wav_path, out_path, audio_ss=audio_ss,
-               audio_span=audio_span):
+               audio_span=audio_span, frames=frames):
             log(f"muxed {out_path.name}")
         else:
             log(f"mux FAILED for {out_path.name}; video-only kept")

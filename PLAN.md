@@ -20,7 +20,7 @@ the event model; current priorities: 1 vill_loss, 2 army_loss, 3 tc_fall,
        rolling. The extension is prio 9 (lowest): it is dropped when any
        other event overlaps it ("interrupted"), and merged into its base
        segment when kept (verified live: mp5 has 3 extended takes).
-- [x] 4. Late-game gate: after minute 20 (t > 1200) a death-based event
+- [x] 4. Late-game gate: after minute 30 (t > 1800) a death-based event
        needs at least 10 deaths to trigger.
 - [x] 5. Buildings count as 2 dead units in army-loss events (same
        player, within 12 tiles, inside the 15-s detection window): the
