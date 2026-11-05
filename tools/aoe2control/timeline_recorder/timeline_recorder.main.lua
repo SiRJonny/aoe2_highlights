@@ -838,15 +838,15 @@ local function sample()
     end
 
     -- TC foundations under construction: who is building (villagers
-    -- within 2 tiles)? The planner picks the FIRST builder per player;
+    -- within 3 tiles)? The planner picks the FIRST builder per player;
     -- the record flow follows them via the object_pos action.
     for id, f in pairs(foundations) do
         if isTCType(f.unitType) then
             local builders = {}
             for vid, v in pairs(now) do
                 if v.playerId == f.playerId
-                        and math.abs(v.x - f.x) <= 2.0
-                        and math.abs(v.y - f.y) <= 2.0 then
+                        and math.abs(v.x - f.x) <= 3.0
+                        and math.abs(v.y - f.y) <= 3.0 then
                     table.insert(builders, vid)
                 end
             end

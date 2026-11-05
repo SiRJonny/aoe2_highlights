@@ -533,8 +533,8 @@ def record_grid(handle, seg, out_dir, fps, mux_queue, idx_plan, tag,
                 log("  grid: reload failed; stopping grid takes")
                 break
         pseg = dict(seg)
-        pseg["x"] = int(pl.get("start_x", pl["tc_x"]))
-        pseg["y"] = int(pl.get("start_y", pl["tc_y"]))
+        pseg["x"] = int(pl["tc_x"])
+        pseg["y"] = int(pl["tc_y"])
         pseg["info"] = dict(seg["info"], follow_id=pl.get("builder_id"))
         out_path = out_dir / (f"clip_{tag}_{idx_plan:02d}_first_tc_grid_"
                               f"p{k}_t{int(seg['t0'])}.mp4")

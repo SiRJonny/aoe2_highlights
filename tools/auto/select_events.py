@@ -72,6 +72,7 @@ CASTLE_BUILD_ENABLED = False   # safe-castle recordings disabled for now
 PRIO_FIRST_TC_GRID = 5         # nomad first-TC grid (same free slot)
 FIRST_TC_TAIL_S = 4.0          # film this long past the last TC done
 NOMAD_MAP_PAT = ("nomad", "migration")
+VILL_POS_END_S = 150.0  # mirrors the module's vill_pos stream window
 PRIO_EXTEND = 9        # battle extension: lowest, yields to everything
 
 PADS = {               # per priority (pb, pa) in game seconds
@@ -495,48 +496,60 @@ def build_candidates(rows):
             if r.get("type") == "teams" and isinstance(r.get("teams"), dict):
                 roster = {int(k) for k in r["teams"]}
                 break
-        starts = {}   # pid: first isTC start row
-        dones = {}    # (pid, id): first done row
-        for r in rows:
-            if r.get("type") != "bld_event" or not r.get("isTC"):
-                continue
-            pid = r.get("owner")
-            if r.get("event") == "start":
-                if pid is not None and pid not in starts:
-                    starts[pid] = r
-            elif r.get("event") == "done":
-                key = (pid, r.get("id"))
-                if key not in dones:
-                    dones[key] = r
-        # vill_pos feed for builder selection: per player, the villager
-        # closest to the foundation when it appears
-        vpos = {}
-        for r in rows:
-            if r.get("type") == "vill_pos" and r.get("time") is not None:
-                vpos.setdefault(round(r["time"], 3), []).extend(
-                    r.get("positions") or [])
+        # per player: the FIRST TC = the earliest completed TC (done
+        # rows are complete; start rows can be lost when the pipe
+        # client attaches mid-nomad). The camera follows the builder —
+        # the earliest builder the module saw on that foundation
+        # (tc_build rows); falls back to the TC site when unknown.
         players = []
         for pid in sorted(roster):
-            st = starts.get(pid)
-            if not st or st.get("time") is None or st.get("x") is None:
+            dstats = sorted(
+                (r for r in rows
+                 if r.get("type") == "bld_event" and r.get("isTC")
+                 and r.get("event") == "done" and r.get("owner") == pid),
+                key=lambda r: r["time"])
+            if not dstats:
                 continue        # no TC built (died before building one)
-            done = dones.get((pid, st.get("id")))
-            t_done = done["time"] if done and done.get("time") else None
-            if t_done is None:
-                continue
-            best = None
-            for t in sorted(vpos):
-                if t > st["time"]:
+            done = dstats[0]
+            t_done = done["time"]
+            blds = sorted(
+                (r for r in rows
+                 if r.get("type") == "tc_build"
+                 and r.get("id") == done.get("id")),
+                key=lambda r: r.get("time") or 0)
+            t_start = blds[0]["time"] if blds else t_done
+            builder_id = None
+            for b in blds:
+                if b.get("builders"):
+                    builder_id = sorted(b["builders"])[0]
                     break
-                for v in vpos[t]:
-                    if v.get("player") == pid and v.get("x") is not None:
-                        d = abs(v["x"] - st["x"]) + abs(v["y"] - st["y"])
-                        if best is None or d < best[0]:
-                            best = (d, v.get("id"))
-            players.append({"pid": pid,
-                            "builder_id": best[1] if best else None,
-                            "tc_x": st["x"], "tc_y": st["y"],
-                            "t_start": st["time"], "t_done": t_done})
+            if builder_id is None:
+                # tc_build builders can be empty (radius misses): pick
+                # the villager most often seen near the TC site in the
+                # vill_pos stream during construction
+                site_x, site_y = done.get("x"), done.get("y")
+                lo = t_start if t_start is not None else max(
+                    0.0, t_done - 90.0)
+                hi = min(t_done, VILL_POS_END_S)
+                presence = {}
+                for r in rows:
+                    if r.get("type") != "vill_pos":
+                        continue
+                    t = r.get("time")
+                    if t is None or not (lo <= t <= hi):
+                        continue
+                    for v in r.get("positions") or []:
+                        if v.get("player") != pid or v.get("x") is None:
+                            continue
+                        if abs(v["x"] - site_x) <= 3.0 \
+                                and abs(v["y"] - site_y) <= 3.0:
+                            presence[v["id"]] = presence.get(v["id"], 0) + 1
+                if presence:
+                    builder_id = max(presence, key=presence.get)
+            players.append({"pid": pid, "builder_id": builder_id,
+                            "tc_x": done.get("x"), "tc_y": done.get("y"),
+                            "t_start": t_start,
+                            "t_done": t_done})
         if players:
             t1 = max(p["t_done"] for p in players) + FIRST_TC_TAIL_S
             cands.append({"kind": "first_tc_grid", "prio": PRIO_FIRST_TC_GRID,

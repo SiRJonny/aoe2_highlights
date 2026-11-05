@@ -397,6 +397,10 @@ def test_first_tc_grid_nomad():
              {"type": "bld_event", "event": "done", "isTC": True,
               "isCastle": False, "name": "TOWN_CENTER", "id": 61,
               "owner": 2, "time": 84, "x": 140, "y": 139},
+             {"type": "tc_build", "time": 10, "id": 60, "owner": 1,
+              "x": 60, "y": 61, "builders": [12, 11]},
+             {"type": "tc_build", "time": 12, "id": 61, "owner": 2,
+              "x": 140, "y": 139, "builders": [21]},
              {"type": "replay_length", "time": 2000}]
     p5 = [c for c in se.build_candidates(rows) if c["prio"] == 5]
     assert len(p5) == 1, p5
@@ -406,7 +410,7 @@ def test_first_tc_grid_nomad():
     assert g["speedName"] == "FAST"
     pls = {p["pid"]: p for p in g["info"]["players"]}
     assert set(pls) == {1, 2}
-    assert pls[1]["builder_id"] == 11, pls[1]     # v11 was closest
+    assert pls[1]["builder_id"] == 11, pls[1]     # earliest tc_build builder
     assert pls[2]["builder_id"] == 21, pls[2]
     assert pls[1]["t_done"] == 70 and pls[2]["t_done"] == 84
     # non-nomad map with a KNOWN name: no grid event even though the
