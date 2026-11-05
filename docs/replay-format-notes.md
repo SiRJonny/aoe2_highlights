@@ -289,3 +289,41 @@ an intermediate. The one folder per replay (`out/<tag>/`) is disposable:
 pass. Never park debug screenshots or csv/svg artifacts there (use
 `%TEMP%\opencode`); `gameui.save_debug` writes to `out/auto_debug/`, which is
 scratch and can be wiped any time.
+
+## Map-animation webapp (spinoff, 2026-11)
+
+An enlarged minimap-style animation of a whole replay: all buildings and
+units in player colors, notable buildings (TC/castle/Krepost) as icons.
+Same toolchain as the highlight pipeline (one FASTEST runthrough, same
+package, same injected module); `out/<tag>/positions.jsonl` + `map.png`
+are intermediates in the same per-replay folder.
+
+- **Module**: the recorder streams an `objects` row per sample — columnar
+  snapshots `[id, owner, unitType, x, y]` for buildings (completed +
+  foundations), villagers and military, positions rounded to 0.1 tile,
+  gaia skipped — but ONLY after the client sends
+  `{"action":"map_mode","on":true}` (highlight collect must never enable
+  it; the rows are big). `map_mode` also re-sends the `meta` row (players,
+  map size, `typeNames` id→name) so a late-attaching client still gets it.
+  `meta` now always carries `typeNames`.
+- **Collect**: `map_collect.py --tag T --touch X.aoe2record` — touch → UI
+  start → pipe → map_mode on → `capture.collect_positions` at FASTEST
+  (keeps `meta`/`objects`/`tc_snap`, same 20-s stall end) →
+  `out/<tag>/positions.jsonl`; then `aoe2hl.terrain.render_replay_png`
+  renders the terrain from the replay's mgz header (full `mgz.summary`
+  header parses with the 67.2/68.0 patch: `map.tiles` = {x, y, elevation,
+  terrain_id}; palette in `terrain.py`, forest=13, water=1/3, grass=14/22)
+  → `out/<tag>/map.png` + a `{"type":"map","name":...}` row appended to
+  the jsonl.
+- **Serve/play**: `map_app.py --tag T` (stdlib http.server, port 8787)
+  serves `tools/auto/map_web/` statics, `/api/data/<tag>` (streamed jsonl)
+  and `/api/map/<tag>` (png). Canvas frontend: player-colored squares
+  (buildings), dots (military/villagers), icon glyphs for notable
+  buildings, sample-to-sample interpolation, play/pause (space), seek
+  slider (±1 s with arrows), 0.5–16× speed, player legend.
+- **No-game fixture**: `map_demo.py` synthesizes `out/demo/` (3 players,
+  scripted march + fight, synthetic terrain) to develop the webapp
+  without the game.
+- Later: stats side panels (the `stats` rows already carry age/resources
+  per player — the module sends them regardless of map_mode; the webapp
+  just ignores them for now).

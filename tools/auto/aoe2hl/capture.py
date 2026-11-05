@@ -43,13 +43,46 @@ def collect(handle, events_path, max_minutes):
                 if t and (last_t is None or t > last_t):
                     last_t = t
                     last_advance = time.time()
-                if r.get("type") == "stats":
+                if r.get("type") in ("stats", "objects"):
                     continue        # big rows, not needed for selection
                 fh.write(json.dumps(r) + "\n")
                 kept += 1
             if last_t and last_t > 60 and time.time() - last_advance > STALL_S:
                 log(f"collect: time stalled at t={last_t:.0f} -> replay "
                     f"-ended, {kept} rows")
+                break
+    return last_t
+
+
+def collect_positions(handle, positions_path, max_minutes):
+    """Stream map-animation snapshots at FASTEST to positions_path.
+
+    Requires the module's map_mode ON ({"action":"map_mode"}); keeps the
+    meta row (players, map size, type names), the per-sample objects
+    snapshots and tc_snap, drops everything else. Ends on the same
+    20-s no-advance stall as collect (replay ended)."""
+    drive.send(handle, {"action": "set_speed", "speedName": "FASTEST"})
+    drive.read_for(handle, 3, quiet=True)
+
+    deadline = time.time() + max_minutes * 60
+    last_t = None
+    last_advance = time.time()
+    kept = 0
+    with open(positions_path, "w", encoding="utf-8") as fh:
+        while time.time() < deadline:
+            for r in drive.read_for(handle, 5, quiet=True):
+                rt = r.get("type")
+                if rt not in ("meta", "objects", "tc_snap"):
+                    continue
+                t = r.get("time")
+                if t and (last_t is None or t > last_t):
+                    last_t = t
+                    last_advance = time.time()
+                fh.write(json.dumps(r) + "\n")
+                kept += 1
+            if last_t and last_t > 60 and time.time() - last_advance > STALL_S:
+                log(f"collect_positions: time stalled at t={last_t:.0f} "
+                    f"-> replay ended, {kept} rows")
                 break
     return last_t
 

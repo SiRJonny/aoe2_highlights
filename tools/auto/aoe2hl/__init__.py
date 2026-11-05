@@ -3,6 +3,7 @@
 Modules:
   paths       out-folder layout: final videos at the out root, one
               folder per replay for all intermediates
+  terrain     minimap-style terrain PNG from the replay header (mgz)
   gameui      window focus, anchor template matching, synthetic clicks
   pipe        named-pipe client for the injected timeline_recorder
               Lua module (send actions, read row streams)
@@ -16,11 +17,11 @@ Modules:
   recorder    the two-pass highlight recorder orchestration
 
 The tools/auto CLIs are thin wrappers over these modules. A spinoff app
-(e.g. an artificial map animation) imports the same primitives instead
-of shelling out:
+(e.g. the map-animation webapp) imports the same primitives instead of
+shelling out:
 
     import sys; sys.path.insert(0, "<repo>/tools/auto")
-    from aoe2hl import capture, paths, pipe, replays_ui
+    from aoe2hl import capture, paths, pipe, replays_ui, terrain
 """
 import sys
 from pathlib import Path

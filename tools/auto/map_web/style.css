@@ -1,0 +1,34 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: #101410; color: #cfd8cf;
+  font: 13px/1.4 system-ui, sans-serif;
+  display: flex; flex-direction: column; align-items: center;
+  min-height: 100vh;
+}
+#top {
+  width: 100%; display: flex; justify-content: space-between;
+  padding: 6px 14px; font-weight: 600;
+}
+#map {
+  width: min(92vh, 96vw, 1080px); height: min(92vh, 96vw, 1080px);
+  image-rendering: pixelated; background: #0a0f0a;
+  border: 1px solid #2c352c; border-radius: 4px;
+}
+#bar {
+  width: min(92vh, 96vw, 1080px); display: flex; gap: 8px;
+  align-items: center; padding: 8px 0;
+}
+#seek { flex: 1; }
+#play {
+  width: 34px; height: 28px; background: #233023; color: #cfd8cf;
+  border: 1px solid #3c4a3c; border-radius: 4px; cursor: pointer;
+}
+#speed {
+  background: #233023; color: #cfd8cf; border: 1px solid #3c4a3c;
+  border-radius: 4px; height: 28px;
+}
+#players { display: flex; gap: 10px; flex-wrap: wrap; }
+.pchip { display: inline-flex; align-items: center; gap: 4px; }
+.pdot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+#hint { color: #6a7a6a; padding-bottom: 8px; }

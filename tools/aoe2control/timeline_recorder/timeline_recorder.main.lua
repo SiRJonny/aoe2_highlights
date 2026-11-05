@@ -31,6 +31,11 @@
 --   tc_snap   {"owner", "x", "y", "kind"}               one-time snapshot of
 --             every completed town center / castle at the first sample
 --             (starting TCs have no build events; prio-7 planner needs them)
+--   objects   {"b": [[id,owner,unitType,x,y],...], "v": [...], "m": [...]}
+--             columnar full-object snapshot (buildings incl. foundations,
+--             villagers, military) for the map-animation tool. OFF until
+--             the client sends {"action":"map_mode","on":true} — the
+--             highlight collect never enables it (rows are big).
 --   tick      debug telemetry every 10 updates
 --
 -- Building lifecycle from Player:GetFoundations() (unfinished buildings are
@@ -46,6 +51,10 @@
 --      "pause":true|false,"camera":true|false}
 --       rest the replay at fastest speed, then pause + move the camera
 --       at game time t (DEFAULT for the highlight seek)
+--   {"action":"map_mode","on":true|false}
+--       start/stop the per-sample "objects" snapshot row (map animation
+--       tool); re-sends the meta row so a late-attaching client gets
+--       players/map size/type names
 --   {"action":"camera","x":..,"y":..}    move the camera now
 --   {"action":"pause"} / {"action":"unpause"}
 --   {"action":"set_speed","v":0..3}      replay speed (ReplaySpeed enum)
@@ -79,6 +88,11 @@ local pan = nil           -- camera tween {"x0","y0","x1","y1","seconds",
                           -- "t0"}: interpolates SetCameraPosition EVERY
                           -- Update so pans render smoothly (pipe-driven
                           -- camera moves batch in the IPC pump and step)
+local mapMode = false     -- objects snapshot row on/off (map animation)
+
+local function round1(v)
+    return math.floor(v * 10 + 0.5) / 10
+end
 
 local function isHouseType(ot)
     return houseTypes[ot] or false
@@ -229,6 +243,7 @@ local function sendMeta()
         players = players,
         sampleInterval = SAMPLE_INTERVAL,
         houseTypes = houseTypes,
+        typeNames = typeNames,
     })
 end
 
@@ -387,6 +402,12 @@ local function handleCommands()
                 speedName = msg.speedName,
             }
             send("ack", { action = "seek", t = seek.t })
+        elseif action == "map_mode" then
+            mapMode = msg.on ~= false
+            -- (re)send meta: the map client may attach mid-replay and
+            -- would otherwise never see players/map size/type names
+            sendMeta()
+            send("ack", { action = action, on = mapMode })
         elseif action == "camera" and msg.x then
             SetCameraPosition(Vector2(msg.x, msg.y))
             send("ack", { action = action })
@@ -671,7 +692,8 @@ local function sampleMilitary()
                     counts[pid] = (counts[pid] or 0) + 1
                 end
                 now[states.id[i]] = { x = states.x[i], y = states.y[i],
-                                      playerId = states.playerId[i] }
+                                      playerId = states.playerId[i],
+                                      unitType = states.unitType[i] }
             end
         end
     end
@@ -683,6 +705,7 @@ local function sampleMilitary()
         end
     end
     militarySeen = now
+    return now
 end
 
 local function trackKeyBuildings()
@@ -788,7 +811,8 @@ local function sample()
             counts[pid] = (counts[pid] or 0) + 1
         end
         now[states.id[i]] = { x = states.x[i], y = states.y[i],
-                              playerId = states.playerId[i] }
+                              playerId = states.playerId[i],
+                              unitType = states.unitType[i] }
     end
     send("vill_pop", { counts = counts })
 
@@ -858,8 +882,48 @@ local function sample()
 
     sampleStats()
     trackBuildings()
-    sampleMilitary()
+    local milNow = sampleMilitary() or {}
     trackKeyBuildings()
+    if mapMode then
+        -- columnar full-object snapshot for the map animation: buildings
+        -- (completed + foundations), villagers, military; player-owned
+        -- only (gaia skipped); positions rounded to 0.1 tile
+        local b, bSeen = {}, {}
+        local ok, cst = pcall(function()
+            return GetObjectStates(GetObjectsByClass(UnitClass.BUILDING))
+        end)
+        if ok and cst and cst.id then
+            for i = 1, #cst.id do
+                local pid = cst.playerId[i]
+                if pid and pid >= 1 then
+                    local id = cst.id[i]
+                    bSeen[id] = true
+                    table.insert(b, { id, pid, cst.unitType[i],
+                                      round1(cst.x[i]), round1(cst.y[i]) })
+                end
+            end
+        end
+        for id, f in pairs(foundations) do
+            if not bSeen[id] and f.playerId and f.playerId >= 1 then
+                table.insert(b, { id, f.playerId, f.unitType,
+                                  round1(f.x), round1(f.y) })
+            end
+        end
+        local v, m = {}, {}
+        for id, u in pairs(now) do
+            if u.playerId and u.playerId >= 1 then
+                table.insert(v, { id, u.playerId, u.unitType,
+                                  round1(u.x), round1(u.y) })
+            end
+        end
+        for id, u in pairs(milNow) do
+            if u.playerId and u.playerId >= 1 then
+                table.insert(m, { id, u.playerId, u.unitType,
+                                  round1(u.x), round1(u.y) })
+            end
+        end
+        send("objects", { b = b, v = v, m = m })
+    end
     if not snapSent then
         snapSent = true
         for _, f in pairs(tcSeen) do
