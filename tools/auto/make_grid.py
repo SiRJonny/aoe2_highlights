@@ -61,7 +61,12 @@ def main():
     durations = [probe_duration(ff, p) for p in args.inputs]
     if any(d is None for d in durations):
         sys.exit("could not probe all inputs")
-    dur = min(durations)          # grid is time-synced; cut at shortest
+    # the grid must cover the FULL phase (until the last TC built + 4 s):
+    # use the median take duration and pad shorter inputs by cloning
+    # their last frame (a take that started late freezes on its final
+    # frame — the camera parked at the TC site)
+    import statistics
+    dur = statistics.median(durations)
 
     cmd = [ff, "-y"]
     for p in args.inputs:
@@ -86,7 +91,12 @@ def main():
                  "[c3]", "[c4]", "[c5]",
                  "[c6]", "[c7]", "[mm]"]
     for i in range(n):
-        fc.append(f"[{i}:v]fps=30,scale={cell[0]}:{cell[1]}[c{i}]")
+        chain = f"[{i}:v]fps=30,scale={cell[0]}:{cell[1]}"
+        if durations[i] is not None and durations[i] < dur - 0.5:
+            chain += (f",tpad=stop_mode=clone:stop_duration="
+                      f"{dur - durations[i]:.3f}")
+        chain += f"[c{i}]"
+        fc.append(chain)
     # minimap: crop the game minimap (bottom-right) from the chosen take
     # and enlarge it into the cell (4p layout has no minimap cell)
     if args.players != 4:
@@ -105,8 +115,8 @@ def main():
         elif pos:
             x += w0
         layout.append(f"{x}_{y}")
-    fc.append("".join(order))
-    fc.append(f"xstack=inputs={len(order)}:layout="
+    fc.append("".join(order)
+              + f"xstack=inputs={len(order)}:layout="
               + "|".join(layout)
               + ":fill=black[v]")
     full = ";".join(fc)
