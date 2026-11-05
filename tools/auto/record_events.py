@@ -183,7 +183,7 @@ def capture_loopback(stop_evt, wav_path):
 
 
 def mux(video_path, wav_path, out_path, audio_ss=None, audio_span=None,
-        frames=None):
+        frames=None, speed_mult=1.0):
     global FFMPEG
     if FFMPEG is None:
         import imageio_ffmpeg
@@ -198,10 +198,11 @@ def mux(video_path, wav_path, out_path, audio_ss=None, audio_span=None,
     # the capture loop may fall behind (or burst) — without this, long
     # takes PLAY SPED-UP (a 57 game-s castle_build clip came out 7 s
     # long at Normal 1.7). itsscale re-stamps the video onto its true
-    # wall span, no re-encode.
+    # wall span, no re-encode. speed_mult (castle_build) compresses on
+    # top: a 3x middle speedup between NORMAL 1.69 and FAST 6.76.
     if frames is not None and audio_span:
         nominal = frames / 30.0
-        scale = audio_span / nominal
+        scale = audio_span / nominal / max(0.1, speed_mult)
         if abs(scale - 1.0) > 0.02:
             cmd += ["-itsscale", f"{scale:.5f}"]
     cmd += ["-i", str(video_path)]
@@ -209,7 +210,9 @@ def mux(video_path, wav_path, out_path, audio_ss=None, audio_span=None,
         cmd += ["-ss", f"{max(0.0, audio_ss):.3f}"]
         if audio_span is not None:
             cmd += ["-t", f"{max(0.0, audio_span):.3f}"]
-    cmd += ["-i", str(wav_path), "-c:v", "copy", "-c:a", "aac",
+    cmd += ["-i", str(wav_path), "-af",
+            f"atempo={max(0.5, min(100.0, speed_mult))}",
+            "-c:v", "copy", "-c:a", "aac",
             "-b:a", "128k", "-shortest", str(tmp)]
     proc = subprocess.run(cmd, capture_output=True)
     if tmp.exists() and tmp.stat().st_size > 0:
@@ -452,9 +455,11 @@ def record_segment(handle, seg, pb, pa, out_path, fps, max_t=None,
         # trim the wav to the video's exact wall span (armed early, joined
         # late — otherwise the tail is a frozen frame over trailing
         # audio) and tell the mux the true wall span so it can re-stamp
-        # the video to real time (frames/wall-s, not the nominal 30)
+        # the video to real time (frames/wall-s, not the nominal 30);
+        # speedMult (castle_build) compresses the clip at mux time
         mux_queue.append((out_path, wav_path, t_vid0 - t_audio0,
-                          t_vid1 - t_vid0, frames))
+                          t_vid1 - t_vid0, frames,
+                          seg.get("speedMult", 1.0)))
     return stopped_head, frames
 
 
@@ -620,9 +625,9 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False,
             max_t=plan.get("replay_length"), pan=pan, mux_queue=mux_queue,
             mask_hud=mask_hud)
         last_cam = (x, y) if frames >= 10 else None
-    for out_path, wav_path, audio_ss, audio_span, frames in mux_queue:
+    for out_path, wav_path, audio_ss, audio_span, frames, mult in mux_queue:
         if mux(out_path, wav_path, out_path, audio_ss=audio_ss,
-               audio_span=audio_span, frames=frames):
+               audio_span=audio_span, frames=frames, speed_mult=mult):
             log(f"muxed {out_path.name}")
         else:
             log(f"mux FAILED for {out_path.name}; video-only kept")
