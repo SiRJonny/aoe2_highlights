@@ -347,7 +347,7 @@ def test_castle_build_safe():
         return rows
     p5 = [c for c in se.build_candidates(rows_with(False))
           if c["prio"] == 5]
-    assert len(p5) == 1 and p5[0].get("speedMult") == 3.0, p5
+    assert len(p5) == 1 and p5[0]["speedName"] == "FAST", p5
     assert p5[0]["t0"] == 1200 and p5[0]["t1"] == 1260
     assert not [c for c in se.build_candidates(rows_with(True))
                 if c["prio"] == 5]

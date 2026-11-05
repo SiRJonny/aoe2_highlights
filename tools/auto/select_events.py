@@ -451,12 +451,11 @@ def build_candidates(rows):
         if feed_nearby(feed, t0 - CASTLE_BUILD_SAFE_S, t1,
                        r["x"], r["y"]):
             continue        # contested ground: not a safe build
-        # filmed at NORMAL and sped up at mux time: the engine's speed
-        # ladder has no middle (NORMAL 1.69 -> FAST 6.76, measured), so
-        # the take plays in real time and setpts/atempo compress it 3x
+        # FAST = 6.76x (measured ladder): the user-chosen construction
+        # speedup; the take settles at FAST and plays wall-real
         cands.append({"kind": "castle_build", "prio": PRIO_CASTLE_BUILD,
                       "t0": t0, "t1": t1,
-                      "x": r["x"], "y": r["y"], "speedMult": 3.0,
+                      "x": r["x"], "y": r["y"], "speedName": "FAST",
                       "info": {"owner": r.get("owner"),
                                "name": r.get("name"),
                                "safe": True}})
