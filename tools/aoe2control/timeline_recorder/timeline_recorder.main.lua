@@ -415,6 +415,23 @@ local function handleCommands()
             end
             SetReplaySpeed(v or ReplaySpeed.NORMAL)
             send("ack", { action = action })
+        elseif action == "set_game_speed" then
+            -- MISC "Game Speed Multiplier": overrides the game's own
+            -- speed (Default/1/1.5/2/5/10/20/30) on top of the replay
+            -- speed preset; "Default" restores the game's own speed
+            local v = msg.v
+            if v == "Default" or v == "default" then
+                local ok, err = pcall(SetGameSpeedMultiplier, 0)
+                send("ack", { action = action, v = "Default",
+                              ok = ok, err = err })
+            else
+                v = tonumber(v)
+                if v then
+                    local ok, err = pcall(SetGameSpeedMultiplier, v)
+                    send("ack", { action = action, v = v,
+                                  ok = ok, err = err })
+                end
+            end
         elseif action == "restart" then
             DispatchRestartGame()
         elseif action == "probe" then
