@@ -480,6 +480,15 @@ def build_candidates(rows):
     map_name = next((r.get("name", "") for r in rows
                      if r.get("type") == "replay_map"), "")
     is_nomad = any(p in map_name.lower() for p in NOMAD_MAP_PAT)
+    if not is_nomad and not map_name:
+        # gameplay fallback for UNKNOWN map names only (mp5's custom
+        # lobby leaves de.rms_filename empty): a nomad start means
+        # NOBODY has a TC at match start (no tc_snap rows at all) while
+        # TCs get built later. A known non-nomad name is trusted.
+        has_tc_snap = any(r.get("type") == "tc_snap" for r in rows)
+        has_later_tc = any(r.get("type") == "bld_event" and r.get("isTC")
+                           for r in rows)
+        is_nomad = not has_tc_snap and has_later_tc
     if is_nomad:
         roster = set()
         for r in rows:

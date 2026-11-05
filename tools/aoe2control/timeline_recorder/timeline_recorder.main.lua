@@ -583,9 +583,25 @@ local function trackBuildings()
         end
     end
 
-    -- new foundations
+    -- new foundations (or a same-ID type swap: a deleted foundation's id
+    -- can be reused for a NEW building in the same sample — e.g. a
+    -- misplaced house lot replaced by a TC on nomad — which would
+    -- otherwise swallow the new building's start row)
     for id, f in pairs(seen) do
-        if not foundations[id] then
+        local prev = foundations[id]
+        if prev and prev.unitType ~= f.unitType then
+            send("bld_event", {
+                event = "lost",
+                isHouse = isHouseType(prev.unitType),
+                isTC = isTCType(prev.unitType),
+                isCastle = false,
+                name = typeNames[prev.unitType],
+                id = id, unitType = prev.unitType, owner = prev.playerId,
+                x = prev.x, y = prev.y,
+            })
+            prev = nil
+        end
+        if not prev then
             local n = typeNames[f.unitType]
             send("bld_event", {
                 event = "start",

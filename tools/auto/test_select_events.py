@@ -409,9 +409,14 @@ def test_first_tc_grid_nomad():
     assert pls[1]["builder_id"] == 11, pls[1]     # v11 was closest
     assert pls[2]["builder_id"] == 21, pls[2]
     assert pls[1]["t_done"] == 70 and pls[2]["t_done"] == 84
-    # non-nomad map: no grid event
+    # non-nomad map with a KNOWN name: no grid event even though the
+    # synthetic rows have no tc_snap (the fallback only covers unknown
+    # names)
     rows[0] = {"type": "replay_map", "name": "Arabia.rms"}
     assert not [c for c in se.build_candidates(rows) if c["prio"] == 5]
+    # UNKNOWN map name + no tc_snap + TC starts -> nomad via fallback
+    rows[0] = {"type": "replay_map", "name": ""}
+    assert [c for c in se.build_candidates(rows) if c["prio"] == 5]
     print("ok test_first_tc_grid_nomad")
 
 
