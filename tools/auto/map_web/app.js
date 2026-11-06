@@ -19,8 +19,9 @@ const ICONS = [
   ["CASTLE", "\u265e"],           // knight
   ["KREPOST", "\u265e"],
 ];
-// draw order: big buildings under, units on top
-const LAYER_PX = 0.9, LAYER_UNIT = 0.55, LAYER_VILL = 0.34;
+// draw order: big buildings under, units on top (sizes in tiles; the
+// demo's 120-tile map renders ~2x bigger than a 231-tile map)
+const LAYER_PX = 1.3, LAYER_UNIT = 0.75, LAYER_VILL = 0.5;
 
 const canvas = document.getElementById("map");
 const ctx = canvas.getContext("2d");
@@ -109,9 +110,15 @@ function draw() {
         }
       }
       const r = px * scale / 2;
+      ctx.fillStyle = color;
+      if (px >= LAYER_PX) {          // buildings: minimap-style squares
+        ctx.fillRect(x - r, y - r, r * 2, r * 2);
+        ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.7)";
+        ctx.strokeRect(x - r, y - r, r * 2, r * 2);
+        continue;
+      }
       ctx.beginPath();
       ctx.arc(x, y, r, 0, 6.2832);
-      ctx.fillStyle = color;
       ctx.fill();
       if (outline) { ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.7)"; ctx.stroke(); }
     }
@@ -173,7 +180,8 @@ async function load() {
     const r = JSON.parse(line);
     if (r.type === "meta") lastMeta = r;
     else if (r.type === "map") mapName = r.name;
-    else if (r.type === "objects") snaps.push(r);
+    else if (r.type === "objects")
+      snaps.push({ t: r.time, b: r.b, v: r.v, m: r.m });
   }
   meta = lastMeta;
   if (!meta || !snaps.length)
@@ -193,6 +201,8 @@ async function load() {
   }
   const end = snaps[snaps.length - 1].t;
   seekEl.max = end;
+  const t0 = parseFloat(new URLSearchParams(location.search).get("t"));
+  if (t0 > 0) { t = Math.min(t0, end); seekEl.value = t; }
   requestAnimationFrame(loop);
 }
 
