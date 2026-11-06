@@ -310,6 +310,23 @@ function drawBuilding(kind, x, y, size, color, hp, typeId) {
   if (alpha < 1) ctx.globalAlpha = 1;
 }
 
+// resigned heuristic: a player's score freezes the moment they leave —
+// nothing gathers, kills or builds any more. 120 flat game-seconds
+// marks them out. (The PLAYER_IN_GAME fact proved unreliable: winners
+// read 0 at game end.)
+const RESIGN_AFTER_S = 120;
+function outFor(pid) {
+  if (scoresI < 0) return false;
+  const arr = scoreRows;
+  const cur = arr[scoresI].scores[pid - 1];
+  if (cur === undefined) return false;
+  let i = scoresI;
+  while (i > 0 && arr[i].scores[pid - 1] === cur) i--;
+  const changeT = arr[i].scores[pid - 1] === cur
+    ? arr[0].t : arr[i + 1].t;
+  return t - changeT >= RESIGN_AFTER_S;
+}
+
 // in-game-style left panel: teams sorted by total score (descending),
 // players sorted within their team, each row score + color + name +
 // pop + age. Score = the game's own Fact.CURRENT_SCORE per player when
@@ -331,7 +348,8 @@ function updateStrip() {
   const stats = statRows[i].stats;
   for (const chip of chips) {
     const row = Array.isArray(stats) ? stats[chip.pid] : null;
-    const sc = curScores ? curScores.scores[chip.pid] : undefined;
+    // scores JSON arrays are 0-based but pid is 1-based
+    const sc = curScores ? curScores.scores[chip.pid - 1] : undefined;
     const eco = curEco[chip.pid];
     if (!hasRealScore) {
       // API score unavailable: the eco count IS the number shown
@@ -350,9 +368,10 @@ function updateStrip() {
       ? "<img src=\"/ages/age_" + (row[0] + 1) + ".png\" alt=\"Age " +
         AGE_ROMAN[row[0]] + "\" title=\"Age " + AGE_ROMAN[row[0]] + "\">"
       : "";
-    // resigned/defeated players: the PLAYER_IN_GAME fact flips to 0
-    const out = !!(curScores && curScores.inGame &&
-                   curScores.inGame[chip.pid] === 0);
+    // resigned players: their score freezes the moment they leave (the
+    // PLAYER_IN_GAME fact turned out to mean something else — winners
+    // read 0 — so the flatline is the reliable signal)
+    const out = outFor(chip.pid);
     if (chip.out !== out) {
       chip.out = out;
       chip.rowEl.classList.toggle("out", out);
