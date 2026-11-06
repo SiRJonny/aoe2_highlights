@@ -218,6 +218,11 @@ function draw() {
   // (world (0,0) corner at the LEFT, (D,0) top, (0,D) bottom, (D,D)
   // right). Matrix = rotate 45 + scale 1/sqrt2 + quarter turn, composed
   // onto the pan/zoom view transform.
+  // clear in device space: the rotated diamond only covers part of the
+  // canvas, so pan/zoom would leave stale pixels in the exposed corners
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#0a0f0a";
+  ctx.fillRect(0, 0, w, canvas.height);
   ctx.imageSmoothingEnabled = false;
   ctx.setTransform(view.z, 0, 0, view.z, view.x, view.y);
   ctx.save();
