@@ -412,6 +412,13 @@ local function handleCommands()
                 send("tc_snap", { owner = f.playerId, x = f.x, y = f.y,
                                   kind = f.kind })
             end
+            -- one-time API probe: every PlayerAttribute member name
+            -- (lets the client check for score-ish attributes offline)
+            local attrNames = {}
+            for k, _ in pairs(PlayerAttribute) do
+                table.insert(attrNames, k)
+            end
+            send("api", { playerAttributes = attrNames })
             send("ack", { action = action, on = mapMode })
         elseif action == "camera" and msg.x then
             SetCameraPosition(Vector2(msg.x, msg.y))

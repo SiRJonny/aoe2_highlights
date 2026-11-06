@@ -51,8 +51,8 @@ const stripEl = document.getElementById("scorebar");
 
 let meta = null;          // latest meta row
 let snaps = [];           // [{t, b, v, m}]
-let statRows = [];        // [{t, stats}] (stats[i+1] = player i)
-let playerInfo = {};      // pid -> {name, colorId}
+let statRows = [];        // [{t, stats}] (stats[i] = player i)
+let playerInfo = {};      // pid -> {name, colorId, team}
 let chips = [];           // {pid, scoreEl, ageEl}
 let bgImg = new Image();
 let bgReady = false;
@@ -168,9 +168,13 @@ function draw() {
   clockEl.textContent = fmtTime(t);
 }
 
-// in-game-style top strip: per player color chip + name + pop + age
-// (the engine exposes no score attribute — probed PlayerAttribute.SCORE,
-// absent in this API — so the strip shows the top bar's pop/age columns)
+// in-game-style left panel: teams sorted by total score (descending),
+// players sorted by score within their team, each row score + color +
+// name + pop + age. The replay carries no per-player score value (the
+// Lua API has no PlayerAttribute.SCORE and this DE version embeds no
+// score in its sync packets), so the score column shows the player's
+// current total resources — the number the in-game economy score is
+// built from — and ordering mirrors that.
 function updateStrip() {
   let i = statsI;
   while (i + 1 < statRows.length && statRows[i + 1].t <= t) i++;
@@ -180,29 +184,85 @@ function updateStrip() {
   const stats = statRows[i].stats;
   for (const chip of chips) {
     const row = Array.isArray(stats) ? stats[chip.pid] : null;
+    const res = row ? [1, 2, 3, 4].reduce((s2, k) =>
+      s2 + (Number.isFinite(row[k]) ? row[k] : 0), 0) : null;
+    chip.scoreEl.textContent = res === null ? "" : Math.round(res);
     chip.popEl.textContent = row && Number.isFinite(row[5]) ? row[5] : "";
     chip.ageEl.textContent =
       row && row[0] >= 0 && row[0] <= 3 ? AGE_ROMAN[row[0]] : "";
+    chip.score = res;
   }
+  // re-order rows: teams by total score desc, players by score desc
+  const teams = {};
+  for (const chip of chips) {
+    const key = chip.team || 0;
+    (teams[key] = teams[key] || []).push(chip);
+  }
+  for (const group of stripEl.querySelectorAll(".tgroup")) {
+    const key = group.dataset.team;
+    const rows = teams[key] || [];
+    rows.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+    const body = group.querySelector(".tbody");
+    for (const c of rows) body.appendChild(c.rowEl);
+    const total = rows.reduce((s2, c) => s2 + (c.score ?? 0), 0);
+    const tEl = group.querySelector(".tscore");
+    if (tEl) tEl.textContent = Math.round(total);
+  }
+  const groups = [...stripEl.querySelectorAll(".tgroup")];
+  groups.sort((a, b) => {
+    const sum = (k) => (teams[k] || [])
+      .reduce((s2, c) => s2 + (c.score ?? 0), 0);
+    return sum(b.dataset.team) - sum(a.dataset.team);
+  });
+  for (const g of groups) stripEl.appendChild(g);
 }
 
 function buildStrip() {
   stripEl.innerHTML = "";
   chips = [];
+  const teams = {};
   for (const p of meta.players) {
     if (p.id < 1 || p.id > 8) continue;
-    const chip = document.createElement("span");
-    chip.className = "pchip";
-    const name = (playerInfo[p.id] && playerInfo[p.id].name) ||
-      ("P" + p.id);
-    chip.innerHTML = "<span class='pdot' style='background:" +
-      colorOf(p.id) + "'></span><span class='pname'></span>" +
-      "<span class='ppop'></span><span class='page'></span>";
-    chip.querySelector(".pname").textContent = name;
-    stripEl.appendChild(chip);
-    chips.push({ pid: p.id,
-                 popEl: chip.querySelector(".ppop"),
-                 ageEl: chip.querySelector(".page") });
+    const info = playerInfo[p.id] || {};
+    const team = info.team || 0;
+    teams[team] = teams[team] || [];
+    teams[team].push(p.id);
+  }
+  const teamKeys = Object.keys(teams).sort((a, b) => +a - +b);
+  for (const key of teamKeys) {
+    const group = document.createElement("div");
+    group.className = "tgroup";
+    group.dataset.team = key;
+    const members = teams[key];
+    const showHeader = teamKeys.length > 1 || key !== "0";
+    if (showHeader) {
+      const head = document.createElement("div");
+      head.className = "trow";
+      head.innerHTML = "<span class='tname'></span>" +
+        "<span class='tscore'></span>";
+      head.querySelector(".tname").textContent =
+        key === "0" ? "FFA" : "Team " + key;
+      group.appendChild(head);
+    }
+    const body = document.createElement("div");
+    body.className = "tbody";
+    group.appendChild(body);
+    for (const pid of members) {
+      const rowEl = document.createElement("div");
+      rowEl.className = "prow";
+      rowEl.innerHTML = "<span class='pscore'></span>" +
+        "<span class='pdot' style='background:" + colorOf(pid) +
+        "'></span><span class='pname'></span>" +
+        "<span class='ppop'></span><span class='page'></span>";
+      rowEl.querySelector(".pname").textContent =
+        (playerInfo[pid] && playerInfo[pid].name) || ("P" + pid);
+      body.appendChild(rowEl);
+      chips.push({ pid, team: +key, score: null, rowEl,
+                   scoreEl: rowEl.querySelector(".pscore"),
+                   popEl: rowEl.querySelector(".ppop"),
+                   ageEl: rowEl.querySelector(".page") });
+    }
+    stripEl.appendChild(group);
   }
   statsI = -1;
 }
