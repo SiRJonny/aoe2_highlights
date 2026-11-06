@@ -67,6 +67,7 @@ def collect_positions(handle, positions_path, max_minutes):
     deadline = time.time() + max_minutes * 60
     last_t = None
     last_advance = time.time()
+    last_data = time.time()
     kept = 0
     with open(positions_path, "w", encoding="utf-8") as fh:
         while time.time() < deadline:
@@ -80,6 +81,11 @@ def collect_positions(handle, positions_path, max_minutes):
                     last_advance = time.time()
                 fh.write(json.dumps(r) + "\n")
                 kept += 1
+                last_data = time.time()
+            if time.time() - last_data > 45:
+                log(f"collect_positions: pipe dead 45 s (last row "
+                    f"t={last_t}) -> giving up")
+                break
             if last_t and last_t > 60 and time.time() - last_advance > STALL_S:
                 log(f"collect_positions: time stalled at t={last_t:.0f} "
                     f"-> replay ended, {kept} rows")
