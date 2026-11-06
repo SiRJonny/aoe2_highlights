@@ -61,8 +61,10 @@ def collect_positions(handle, positions_path, max_minutes):
     meta row (players, map size, type names), the per-sample objects
     snapshots and tc_snap, drops everything else. Ends on the same
     20-s no-advance stall as collect (replay ended)."""
+    # NOTE: no pre-read after set_speed — rows arriving in that window
+    # (a fresh map_mode's meta + tc_snap) are DATA; the loop below
+    # filters acks/ticks by type instead.
     drive.send(handle, {"action": "set_speed", "speedName": "FASTEST"})
-    drive.read_for(handle, 3, quiet=True)
 
     deadline = time.time() + max_minutes * 60
     last_t = None
