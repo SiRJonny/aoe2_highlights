@@ -47,7 +47,8 @@ function fmtTime(s) {
 
 function idIndex(snap, layer) {
   const m = new Map();
-  const rows = snap[layer];
+  // an empty Lua layer arrives as {} (truthy, not an array)
+  const rows = Array.isArray(snap[layer]) ? snap[layer] : [];
   for (let i = 0; i < rows.length; i++) m.set(rows[i][0], rows[i]);
   return m;
 }
@@ -88,7 +89,8 @@ function draw() {
   if (bgReady) ctx.drawImage(bgImg, 0, 0, w, w);
   else { ctx.fillStyle = "#2d542d"; ctx.fillRect(0, 0, w, w); }
 
-  const layer = (rows, from, to, px, outline, iconFn) => {
+  const layer = (rowsIn, from, to, px, outline, iconFn) => {
+    const rows = Array.isArray(rowsIn) ? rowsIn : [];
     for (const row of rows) {
       const p = interp(from, to, row[0], f);
       if (!p) continue;
