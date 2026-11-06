@@ -77,7 +77,7 @@ def collect_positions(handle, positions_path, max_minutes):
             for r in drive.read_for(handle, 5, quiet=True):
                 rt = r.get("type")
                 if (rt not in ("meta", "objects", "tc_snap", "stats", "api",
-                               "scores")
+                               "scores", "chat", "bld_event")
                         and not rt.startswith("api2")):
                     continue
                 t = r.get("time")

@@ -901,6 +901,7 @@ end
 -- "fp" = GetFact(fact, pid), "pf" = GetFact(pid, fact)); "none" when
 -- nothing works -> the client falls back to its eco count
 local scoreSig = nil
+local chatSeen = 0
 local function scoreCall(pid)
     local factIdx = Fact.CURRENT_SCORE
     if scoreSig == "method" then
@@ -966,6 +967,40 @@ local function sampleStats()
         end
     end
     send("stats", { stats = rows })
+
+    -- chat capture: resign/defeat announcements arrive as system chat
+    -- messages; forward each message with the game time so the client
+    -- can timestamp resignations exactly (unknown message shape is
+    -- sanitized: strings/numbers/booleans pass, rest is stringified)
+    pcall(function()
+        local msgs = GetAllChatMessages()
+        if type(msgs) ~= "table" or #msgs < chatSeen then
+            chatSeen = 0
+        end
+        if #msgs > chatSeen then
+            local out = {}
+            for i = chatSeen + 1, #msgs do
+                local m = msgs[i]
+                if type(m) == "table" then
+                    local clean = {}
+                    for k, v in pairs(m) do
+                        local tv = type(v)
+                        if tv == "string" or tv == "number"
+                            or tv == "boolean" then
+                            clean[k] = v
+                        else
+                            clean[k] = tostring(v)
+                        end
+                    end
+                    table.insert(out, clean)
+                else
+                    table.insert(out, { text = tostring(m) })
+                end
+            end
+            chatSeen = #msgs
+            send("chat", { time = GetGameTime(), msgs = out })
+        end
+    end)
 
     -- real score per player when the Fact API cooperates (sent at the
     -- stats cadence so the client can align both by time)

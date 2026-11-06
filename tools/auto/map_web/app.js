@@ -73,6 +73,8 @@ let meta = null;          // latest meta row
 let snaps = [];           // [{t, b, v, m, eco}]
 let statRows = [];        // [{t, stats}] (stats[i] = player i)
 let scoreRows = [];       // [{t, scores}] real score per player (API)
+let chatRows = [];        // [{t, msgs}] chat capture (resign messages)
+let consNow = new Set();  // building ids currently under construction
 let playerInfo = {};      // pid -> {name, colorId, team}
 let chips = [];           // {pid, scoreEl, ageEl}
 let bgImg = new Image();
@@ -91,6 +93,9 @@ let dataHasHp = false;    // snapshot building rows carry hp (new data)
 let prevHp = null;        // id -> hp last snapshot (unfinished = rising)
 let hpRising = null;      // ids whose hp rose since the last snapshot
 let lastHpT = -1e9;       // game time of the prevHp snapshot
+let curCons = null;       // construction-id set at the current snapshot
+let resignedAt = null;    // pid -> game time of the resign chat message
+let hasResignData = false;
 let statsI = -1;
 
 function fmtTime(s) {
@@ -188,6 +193,7 @@ function draw() {
     bNotable = bDed.filter((r) => notableKindFor(r[2]));
     bPlain = bDed.filter((r) => !notableKindFor(r[2]));
     curEco = s0.eco || {};
+    curCons = s0.cons || null;
     // unfinished buildings: their hp is RISING (construction); damage
     // lowers hp, completed buildings hold steady — no max-hp table
     // needed (upgrades shift real maxima)
@@ -210,11 +216,16 @@ function draw() {
   // terrain: rotate the square map image 45 deg + fit so the world
   // diamond touches the canvas edge midpoints, then 90 deg to the left
   // (world (0,0) corner at the LEFT, (D,0) top, (0,D) bottom, (D,D)
-  // right). Matrix = rotate 45 + scale 1/sqrt2 + quarter turn.
-  ctx.setTransform(0.5, -0.5, 0.5, 0.5, 0, w / 2);
+  // right). Matrix = rotate 45 + scale 1/sqrt2 + quarter turn, composed
+  // onto the pan/zoom view transform.
+  ctx.imageSmoothingEnabled = false;
+  ctx.setTransform(view.z, 0, 0, view.z, view.x, view.y);
+  ctx.save();
+  ctx.transform(0.5, -0.5, 0.5, 0.5, 0, w / 2);
   if (bgReady) ctx.drawImage(bgImg, 0, 0, w, w);
   else { ctx.fillStyle = "#2d542d"; ctx.fillRect(0, 0, w, w); }
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.restore();
+  ctx.setTransform(view.z, 0, 0, view.z, view.x, view.y);
 
   const toScreen = (x, y) => [(x + y) * s2, (D - x + y) * s2];
 
@@ -363,10 +374,11 @@ function updateStrip() {
       ? "<img src=\"/ages/age_" + (row[0] + 1) + ".png\" alt=\"Age " +
         AGE_ROMAN[row[0]] + "\" title=\"Age " + AGE_ROMAN[row[0]] + "\">"
       : "";
-    // resigned players: their score freezes the moment they leave (the
-    // PLAYER_IN_GAME fact turned out to mean something else — winners
-    // read 0 — so the flatline is the reliable signal)
-    const out = outFor(chip.pid);
+    // resigned players: cross out from the chat announcement when chat
+    // was captured; fall back to the score-flatline heuristic otherwise
+    const out = hasResignData
+      ? (resignedAt[chip.pid] !== undefined && t >= resignedAt[chip.pid])
+      : outFor(chip.pid);
     if (chip.out !== out) {
       chip.out = out;
       chip.rowEl.classList.toggle("out", out);
@@ -501,9 +513,57 @@ seekEl.oninput = () => { t = parseFloat(seekEl.value); };
 document.addEventListener("keydown", (e) => {
   if (e.code === "Space") { e.preventDefault(); playBtn.onclick(); }
   else if (e.code === "KeyD") toggleDbg();
+  else if (e.code === "KeyR") { view = { x: 0, y: 0, z: 1 }; }
   else if (e.code === "ArrowRight") t = Math.min(t + 1, snaps.at(-1).t);
   else if (e.code === "ArrowLeft") t = Math.max(0, t - 1);
 });
+
+// pan/zoom on the map: wheel zooms toward the cursor, left-drag pans,
+// double-click or R resets
+let view = { x: 0, y: 0, z: 1 };
+function clampView() {
+  view.z = Math.max(1, Math.min(8, view.z));
+  if (view.z === 1) { view.x = 0; view.y = 0; return; }
+  const s = canvas.width * view.z;
+  view.x = Math.max(canvas.width - s, Math.min(0, view.x));
+  view.y = Math.max(canvas.width - s, Math.min(0, view.y));
+}
+function evPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const k = canvas.width / rect.width;
+  return { x: (e.clientX - rect.left) * k, y: (e.clientY - rect.top) * k };
+}
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const p = evPos(e);
+  const old = view.z;
+  const z = Math.max(1, Math.min(8, view.z * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+  view.x = p.x - (p.x - view.x) * (z / old);
+  view.y = p.y - (p.y - view.y) * (z / old);
+  view.z = z;
+  clampView();
+}, { passive: false });
+let drag = null;
+canvas.addEventListener("mousedown", (e) => {
+  if (e.button === 0) {
+    drag = { x: e.clientX, y: e.clientY };
+    canvas.style.cursor = "grabbing";
+  }
+});
+window.addEventListener("mousemove", (e) => {
+  if (!drag) return;
+  const rect = canvas.getBoundingClientRect();
+  const k = canvas.width / rect.width;
+  view.x += (e.clientX - drag.x) * k;
+  view.y += (e.clientY - drag.y) * k;
+  drag = { x: e.clientX, y: e.clientY };
+  clampView();
+});
+window.addEventListener("mouseup", () => {
+  drag = null;
+  canvas.style.cursor = "grab";
+});
+canvas.addEventListener("dblclick", () => { view = { x: 0, y: 0, z: 1 }; });
 
 async function load() {
   document.getElementById("mapname").textContent = "loading " + tag + " ...";
@@ -530,11 +590,19 @@ async function load() {
       if (Array.isArray(r.v))
         for (const row of r.v)
           eco[row[1]] = (eco[row[1]] || 0) + 1;
-      snaps.push({ t: r.time, b: r.b, v: r.v, m: r.m, eco });
+      snaps.push({ t: r.time, b: r.b, v: r.v, m: r.m, eco,
+                   cons: new Set(consNow) });
     }
     else if (r.type === "stats") statRows.push({ t: r.time, stats: r.stats });
     else if (r.type === "scores")
       scoreRows.push({ t: r.time, scores: r.scores || {} });
+    else if (r.type === "bld_event") {
+      // engine-derived construction events: start = foundation placed,
+      // done/lost = no longer under construction (stream order = time)
+      if (r.event === "start" && r.id !== undefined) consNow.add(r.id);
+      else if (r.id !== undefined) consNow.delete(r.id);
+    } else if (r.type === "chat")
+      chatRows.push({ t: r.time, msgs: r.msgs || [] });
   }
   meta = lastMeta;
   if (!meta || !snaps.length)
@@ -545,6 +613,24 @@ async function load() {
   buildStrip();
   dataHasHp = snaps.some((s) => (s.b || []).some((r) => r.length >= 6));
   hasRealScore = scoreRows.length > 0;
+  // resign/defeat announcements arrive as system chat naming the player
+  const RESIGN_RE = /resign|defeat|concede|surrender/i;
+  resignedAt = {};
+  for (const row of chatRows) {
+    for (const m of row.msgs) {
+      const text = typeof m === "string"
+        ? m : (m.text || m.message || m.Text || m.Message || "");
+      if (!RESIGN_RE.test(text)) continue;
+      for (const pid of Object.keys(playerInfo)) {
+        const name = playerInfo[pid].name;
+        if (name && text.includes(name)) {
+          resignedAt[pid] = row.t;
+          break;
+        }
+      }
+    }
+  }
+  hasResignData = Object.keys(resignedAt).length > 0;
   document.getElementById("scorelabel").textContent =
     hasRealScore ? "score" : "score*";
   const end = snaps[snaps.length - 1].t;
