@@ -452,12 +452,9 @@ local function handleCommands()
                           unitClasses = classNames,
                           globals = globals, playerKeys = pkeys })
 
-            -- second probe: the score-hunting tables. Fact and
-            -- ResourceTracker member names, SnapshotPlayer fields, named
-            -- access attempts on the player object, GetUnitTypeCount
-            -- signature samples, GetFact name samples. All pcall-guarded;
-            -- results let the client decide between a real score and an
-            -- eco-count fallback.
+            -- second probe, one row per target so a failure in one part
+            -- cannot swallow the others (the api row arrived but api2
+            -- vanished last run -> something here threw outside a pcall)
             local function keys(t)
                 local out = {}
                 pcall(function()
@@ -468,12 +465,28 @@ local function handleCommands()
                 end)
                 return out
             end
-            local factKeys = keys(Fact)
-            local rtKeys = keys(ResourceTracker)
-            local spKeys = keys(SnapshotPlayer)
-            local plKeys = keys(Player)
-            local pNamed = {}
-            pcall(function()
+            local function probeRow(name, fn)
+                local ok, res = pcall(fn)
+                if ok and type(res) == "table" then
+                    send(name, res)
+                else
+                    send(name, { error = tostring(res) })
+                end
+            end
+            probeRow("api2_fact", function()
+                return { keys = keys(Fact) }
+            end)
+            probeRow("api2_rt", function()
+                return { keys = keys(ResourceTracker) }
+            end)
+            probeRow("api2_sp", function()
+                return { keys = keys(SnapshotPlayer) }
+            end)
+            probeRow("api2_player", function()
+                return { keys = keys(Player) }
+            end)
+            probeRow("api2_named", function()
+                local out = {}
                 local p1 = GetPlayerById(1)
                 if p1 then
                     for _, name in ipairs({ "Score", "Scores", "GetScore",
@@ -483,38 +496,34 @@ local function handleCommands()
                                             "ScoreValue", "GetAttributes" }) do
                         local ok, v = pcall(function() return p1[name] end)
                         if ok and v ~= nil then
-                            table.insert(pNamed, name .. ":" .. type(v))
+                            table.insert(out, name .. ":" .. type(v))
                         end
                     end
                 end
+                table.sort(out)
+                return { named = out }
             end)
-            table.sort(pNamed)
-            local utc = {}
-            pcall(function()
-                table.insert(utc, "p1t83=" .. tostring(GetUnitTypeCount(1, 83)))
-            end)
-            pcall(function()
-                table.insert(utc, "t83=" .. tostring(GetUnitTypeCount(83)))
-            end)
-            pcall(function()
-                table.insert(utc, "p1villager="
+            probeRow("api2_utc", function()
+                local out = {}
+                table.insert(out, "p1t83="
+                    .. tostring(GetUnitTypeCount(1, 83)))
+                table.insert(out, "t83=" .. tostring(GetUnitTypeCount(83)))
+                table.insert(out, "p1villager="
                     .. tostring(GetUnitTypeCount(1, UnitObjectType.VILLAGER)))
+                return { counts = out }
             end)
-            local factSamples = {}
-            pcall(function()
+            probeRow("api2_getfact", function()
+                local out = {}
                 for _, name in ipairs({ "PlayerScore", "Score", "Scores",
                                         "ResourcesGathered", "GatheredFood",
                                         "PlayerKills", "MilitaryScore" }) do
                     local ok, v = pcall(function() return GetFact(name) end)
                     if ok then
-                        table.insert(factSamples, name .. "=" .. tostring(v))
+                        table.insert(out, name .. "=" .. tostring(v))
                     end
                 end
+                return { samples = out }
             end)
-            send("api2", { factKeys = factKeys, resourceTracker = rtKeys,
-                           snapshotPlayer = spKeys, playerTable = plKeys,
-                           playerNamed = pNamed, unitTypeCount = utc,
-                           factSamples = factSamples })
             send("ack", { action = action, on = mapMode })
         elseif action == "camera" and msg.x then
             SetCameraPosition(Vector2(msg.x, msg.y))

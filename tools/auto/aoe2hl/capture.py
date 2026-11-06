@@ -76,7 +76,8 @@ def collect_positions(handle, positions_path, max_minutes):
         while time.time() < deadline:
             for r in drive.read_for(handle, 5, quiet=True):
                 rt = r.get("type")
-                if rt not in ("meta", "objects", "tc_snap", "stats", "api"):
+                if (rt not in ("meta", "objects", "tc_snap", "stats", "api")
+                        and not rt.startswith("api2")):
                     continue
                 t = r.get("time")
                 if t and (last_t is None or t > last_t):
