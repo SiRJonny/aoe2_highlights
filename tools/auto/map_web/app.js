@@ -5,21 +5,23 @@
  *   stats   {stats: [[age,food,wood,stone,gold,pop,score?], ...]} per player
  *   names   {names: {pid: {name, colorId}}} from the replay header
  *
- * Orientation matches the in-game minimap: the world is rotated 45
- * degrees (north corner top, east right, south bottom, west left).
- * Buildings are squares (notable ones larger with an icon glyph inside),
- * units are dots, all in each player's real in-game color (mgz color_id
- * from the replay header, falling back to slot defaults). The strip above
- * the map mimics the in-game top bar: color, name, score, age.
+ * Orientation: the world is rotated 45 degrees like the in-game minimap,
+ * then turned 90 deg to the left (world (0,0) at the left corner).
+ * Buildings are squares (notable ones larger with an icon glyph inside —
+ * ?icons= switches between square/glyph/emoji/vector/game sets), units
+ * are dots, all in each player's exact in-game color (spritecolors.json
+ * TeamColors, addressed by the mgz color_id from the replay header).
  */
 "use strict";
 
 const tag = new URLSearchParams(location.search).get("tag") || "demo";
-// DE lobby color indexes per mgz.reference: 0=Blue,1=Red,2=Green,3=Yellow,
-// 4=Teal,5=Purple,6=Gray,7=Orange
+const iconSet = new URLSearchParams(location.search).get("icons") || "glyph";
+// EXACT DE team colors, from the game's own
+// resources/_common/palettes/spritecolors.json ("TeamColors", 0-1 floats
+// x255): blue red green yellow teal purple gray orange.
 const COLOR_ID_HEX = [
-  "#2C5AD8", "#C3332F", "#2E7D32", "#D9B426",
-  "#17A2A2", "#8A44B8", "#9E9E9E", "#E0801E",
+  "#0000FF", "#FF0000", "#00A91B", "#D6D61B",
+  "#7BEFF0", "#8A13F7", "#666666", "#FF9205",
 ];
 // slot fallback when the replay header is unavailable (classic cycle:
 // blue red yellow green cyan purple gray orange)
@@ -30,15 +32,17 @@ const SLOT_HEX = [
 ];
 const GAIA = "#9ab09a";
 const NOTABLE = [
-  ["TOWN_CENTER", "\u2302"],
-  ["CASTLE", "\u265c"],
-  ["KREPOST", "\u265c"],
-  ["DONJON", "\u265c"],
-  ["FORTIFIED_CHURCH", "\u271d"],
-  ["FEITORIA", "\u265c"],
+  ["TOWN_CENTER", "town_center"],
+  ["CASTLE", "castle"],
+  ["KREPOST", "krepost"],
+  ["DONJON", "donjon"],
+  ["FORTIFIED_CHURCH", "fortified_church"],
+  ["FEITORIA", "feitoria"],
 ];
 // draw order: big buildings under, units on top (sizes in world tiles)
 const LAYER_PX = 1.3, LAYER_UNIT = 0.75, LAYER_VILL = 0.5, NOTABLE_PX = 2.6;
+// military dots by class tag (Lua sends row[5] = "i"/"c" when it can)
+const UNIT_MULT = { c: 1.45, i: 0.85 };
 const AGE_ROMAN = ["I", "II", "III", "IV"];
 
 const canvas = document.getElementById("map");
@@ -94,10 +98,10 @@ function interp(from, to, id, f) {
   return null;
 }
 
-function notableFor(typeName) {
+function notableKindFor(typeName) {
   const n = meta.typeNames[typeName] || "";
-  for (const [prefix, glyph] of NOTABLE)
-    if (n.startsWith(prefix)) return glyph;
+  for (const [prefix, kind] of NOTABLE)
+    if (n.startsWith(prefix)) return kind;
   return null;
 }
 
@@ -121,14 +125,15 @@ function draw() {
   }
 
   // terrain: rotate the square map image 45 deg + fit so the world
-  // diamond touches the canvas edge midpoints (dark corners, in-game
-  // minimap look). Matrix = rotate 45 + scale 1/sqrt2.
-  ctx.setTransform(0.5, 0.5, -0.5, 0.5, w / 2, 0);
+  // diamond touches the canvas edge midpoints, then 90 deg to the left
+  // (world (0,0) corner at the LEFT, (D,0) top, (0,D) bottom, (D,D)
+  // right). Matrix = rotate 45 + scale 1/sqrt2 + quarter turn.
+  ctx.setTransform(0.5, -0.5, 0.5, 0.5, 0, w / 2);
   if (bgReady) ctx.drawImage(bgImg, 0, 0, w, w);
   else { ctx.fillStyle = "#2d542d"; ctx.fillRect(0, 0, w, w); }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-  const toScreen = (x, y) => [(x - y + D) * s2, (x + y) * s2];
+  const toScreen = (x, y) => [(x + y) * s2, (D - x + y) * s2];
 
   const layer = (rowsIn, from, to, px, circular) => {
     const rows = Array.isArray(rowsIn) ? rowsIn : [];
@@ -137,27 +142,22 @@ function draw() {
       if (!p) continue;
       const [x, y] = toScreen(p[0], p[1]);
       const color = colorOf(row[1]);
-      const notable = circular ? null : notableFor(row[2]);
-      const size = (notable ? NOTABLE_PX : px) * tile;
-      const r = size / 2;
-      ctx.fillStyle = color;
-      ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
+      const kind = circular ? null : notableKindFor(row[2]);
+      let size = (kind ? NOTABLE_PX : px) * tile;
       if (circular) {
+        // infantry vs cavalry: the Lua side tags row[5] where it can
+        const mult = UNIT_MULT[p[2] && p[2][5]] || 1;
+        size *= mult;
+        const r = size / 2;
+        ctx.fillStyle = color;
+        ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
         ctx.beginPath();
         ctx.arc(x, y, Math.max(1.1, r), 0, 6.2832);
         ctx.fill();
         ctx.stroke();
-      } else {
-        ctx.fillRect(x - r, y - r, size, size);
-        ctx.strokeRect(x - r, y - r, size, size);
-        if (notable) {
-          ctx.font = Math.round(size * 0.85) + "px serif";
-          ctx.textAlign = "center"; ctx.textBaseline = "middle";
-          ctx.fillStyle = "#fff";
-          ctx.fillText(notable, x, y);
-          ctx.strokeText(notable, x, y);
-        }
+        continue;
       }
+      drawBuilding(kind, x, y, size, color, row[2]);
     }
   };
   layer(s0.b, idxA.b, idxB.b, LAYER_PX, false);
@@ -166,6 +166,57 @@ function draw() {
 
   updateStrip();
   clockEl.textContent = fmtTime(t);
+}
+
+/* Buildings: dispatch to the selected icon set. Glyph/emoji draw a player-
+ * colored square with the glyph on top; vector replaces the square with a
+ * painted silhouette; game draws the real DE icon on a dark plate. Any
+ * kind a set does not cover falls back to the glyph square. */
+const gameImgs = {};
+for (const [kind, file] of Object.entries(ICON_SETS.game)) {
+  if (!file) continue;
+  const im = new Image();
+  im.src = file;
+  gameImgs[kind] = im;
+}
+
+function drawBuilding(kind, x, y, size, color, typeName) {
+  const r = size / 2;
+  ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
+  ctx.fillStyle = color;
+  const vec = iconSet === "vector" && kind && ICON_SETS.vector[kind];
+  const img = iconSet === "game" && kind && gameImgs[kind];
+  const useGame = img && img.complete && img.naturalWidth > 0;
+  if (vec) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(size / 24, size / 24);
+    ctx.lineWidth = 2; ctx.lineJoin = "round";
+    vec(ctx);
+    ctx.restore();
+    return;
+  }
+  if (useGame) {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, 6.2832);
+    ctx.fillStyle = "rgba(10,14,10,.72)";
+    ctx.fill();
+    ctx.stroke();
+    ctx.drawImage(img, x - r, y - r, size, size);
+    return;
+  }
+  ctx.fillRect(x - r, y - r, size, size);
+  ctx.strokeRect(x - r, y - r, size, size);
+  const glyph = kind ? ICON_SETS[iconSet === "game" ? "glyph" : iconSet][kind]
+    : null;
+  if (glyph) {
+    ctx.font = Math.round(size * (iconSet === "emoji" ? 0.72 : 0.85)) +
+      "px serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#fff";
+    ctx.fillText(glyph, x, y + size * 0.04);
+    ctx.strokeText(glyph, x, y + size * 0.04);
+  }
 }
 
 // in-game-style left panel: teams sorted by total score (descending),

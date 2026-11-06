@@ -47,10 +47,11 @@ def main():
                {"id": 3, "name": "Carol"}]
     bases = {1: (30, 30), 2: (90, 30), 3: (60, 90)}
 
-    # squads: p1+2 march to the middle, fight at t=60 (casualties vanish)
+    # squads: p1+2 march to the middle, fight at t=60 (casualties vanish);
+    # member 0-1 infantry (type 4), member 2 archer, member 3 cavalry
     squads = {
-        1: [[35.0, 35.0], [36.0, 34.5], [34.6, 36.2]],
-        2: [[85.0, 85.0], [84.2, 84.6], [85.6, 84.1]],
+        1: [[35.0, 35.0], [36.0, 34.5], [34.6, 36.2], [35.5, 37.0]],
+        2: [[85.0, 85.0], [84.2, 84.6], [85.6, 84.1], [84.0, 82.8]],
     }
     march = {1: [60, 60], 2: [60, 60]}
     dead = {1: set(), 2: set()}
@@ -69,9 +70,9 @@ def main():
         }) + "\n")
         fh.write(json.dumps({
             "type": "names",
-            "names": {"1": {"name": "Alice", "colorId": 0},
-                      "2": {"name": "Bob", "colorId": 7},
-                      "3": {"name": "Carol", "colorId": 5}},
+            "names": {"1": {"name": "Alice", "colorId": 0, "team": 1},
+                      "2": {"name": "Bob", "colorId": 7, "team": 2},
+                      "3": {"name": "Carol", "colorId": 5, "team": 1}},
         }) + "\n")
 
         for t in range(SECS + 1):
@@ -97,9 +98,11 @@ def main():
                             a = math.atan2(my - pos[1], mx - pos[0])
                             pos[0] += math.cos(a) * 0.9
                             pos[1] += math.sin(a) * 0.9
+                        # row[5] = class tag: i infantry, c cavalry
                         m.append([2000 + p * 100 + k, p,
-                                  4 if k < 2 else 5,
-                                  round(pos[0], 1), round(pos[1], 1)])
+                                  4 if k < 2 else (5 if k == 2 else 38),
+                                  round(pos[0], 1), round(pos[1], 1),
+                                  "i" if k < 2 else ("c" if k == 3 else None)])
             if t == 60:
                 dead[1] = {0}            # one casualty each side
                 dead[2] = {2}
@@ -115,12 +118,12 @@ def main():
                 "type": "objects", "time": t, "b": b, "v": v, "m": m,
             }) + "\n")
 
-    # terrain: grass + lake bottom-left + forest blobs (real id values)
+    # terrain: grass (official id 0) + lake bottom-left + forest blobs
     rng2 = np.random.default_rng(3)
     tiles = []
     for y in range(DIM):
         for x in range(DIM):
-            tid = 14
+            tid = 0
             d = math.hypot(x - 20, y - 100)
             if d < 18:
                 tid = 1 if d < 15 else 2
@@ -128,8 +131,8 @@ def main():
                               (95, 25, 4), (25, 65, 4)):
                 if math.hypot(x - cx, y - cy) < r:
                     tid = 13
-            if tid == 14 and rng2.random() < 0.01:
-                tid = 22
+            if tid == 0 and rng2.random() < 0.01:
+                tid = 100
             tiles.append({"x": x, "y": y, "elevation": 0, "terrain_id": tid})
 
     sys_path = str(Path(__file__).parent)

@@ -12,22 +12,33 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-# Terrain id -> (R, G, B), tuned after the in-game DE minimap:
-# grass shades (13 forest, 14 main, 22 alt, 23 scrub), water 1 shallow /
-# 3 deep (adjacency-checked on a nomad replay), shore/sand (2, 48).
-TERRAIN_COLORS = {
-    0: (128, 108, 66),       # dirt / gaia patch
-    1: (52, 98, 205),        # shallow water
-    2: (203, 180, 108),      # sandy shore
-    3: (32, 62, 158),        # deep water
-    13: (26, 62, 20),        # forest (tree canopy blobs)
-    14: (76, 106, 38),       # main grass (olive green)
-    22: (86, 116, 46),       # grass alt
-    23: (62, 90, 34),        # scrub / forest floor
-    48: (188, 168, 100),     # sand
-}
-WATER_IDS = {1, 3, 4, 10, 11, 12}
-FALLBACK = (88, 122, 42)
+# Terrain id -> (R, G, B), straight from the official DE minimap colors
+# in SiegeEngineers/aoc-reference-data data/datasets/100.json (grouped by
+# identical "level" color): grass shades, shallow/medium/deep water,
+# beach, dirt, farm, forest (deeper green than grass, as in-game), ice.
+TERRAIN_COLORS = {}
+for _ids, _c in [
+    ((0, 5, 9, 12, 16, 60, 68, 69, 70, 71, 72, 73, 74, 76, 77, 83, 84,
+      85, 86, 87, 100), (51, 151, 39)),      # grass / dry grass
+    ((1, 15, 28, 95, 96, 97, 98, 99), (48, 93, 182)),     # water shallow
+    ((2, 14, 45, 46, 51, 52, 53, 79, 80, 81, 82, 101, 102, 107, 108,
+      109), (232, 180, 120)),                # beach / desert / sand
+    ((3, 6, 11, 24, 25, 27, 36, 40, 41, 42, 75, 78), (228, 162, 82)),
+    ((4, 54, 59, 90, 93, 94), (84, 146, 176)),            # shallows
+    ((7, 8, 29, 30, 31, 32, 63, 64, 65, 66, 67), (130, 136, 77)),  # farm
+    ((10, 13, 17, 18, 19, 20, 21, 48, 49, 50, 55, 56, 88, 89, 91, 92,
+      104, 105, 106), (21, 118, 21)),        # forest (deeper green)
+    ((22, 57), (0, 74, 161)),                # water deep
+    ((23,), (0, 74, 187)),                   # water medium
+    ((26, 35, 37), (152, 192, 240)),         # ice
+    ((47,), (28, 28, 28)),                   # black
+    ((58,), (0, 84, 176)),                   # water azure
+]:
+    for _i in _ids:
+        TERRAIN_COLORS[_i] = _c
+WATER_IDS = {1, 3, 4, 10, 11, 12, 15, 22, 23, 28, 54, 57, 58, 59, 90,
+             93, 94, 95, 96, 97, 98, 99}
+FALLBACK = (51, 151, 39)
 
 MAP_PX = 1080            # rendered square resolution
 
@@ -48,7 +59,13 @@ def _tile_array(tiles, dimension):
         elev[y, x] = t.get("elevation", 0)
     # elevation shading (not on water): one visible step per level, as
     # in-game; base level ~2 renders unlifted
+    water = np.zeros((dimension, dimension), dtype=bool)
+    for t in tiles:
+        x, y = t["x"], t["y"]
+        if 0 <= x < dimension and 0 <= y < dimension:
+            water[y, x] = t["terrain_id"] in WATER_IDS
     lift = ((elev.astype(np.int16) - 2) * 14).clip(-56, 56)
+    lift[water] = 0
     img = img.astype(np.int16) + lift[..., None]
     return img.clip(0, 255).astype(np.uint8)
 

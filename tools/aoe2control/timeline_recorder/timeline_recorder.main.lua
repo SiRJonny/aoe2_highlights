@@ -412,13 +412,45 @@ local function handleCommands()
                 send("tc_snap", { owner = f.playerId, x = f.x, y = f.y,
                                   kind = f.kind })
             end
-            -- one-time API probe: every PlayerAttribute member name
-            -- (lets the client check for score-ish attributes offline)
+            -- one-time API probe: PlayerAttribute + UnitClass member
+            -- names, every global function/table, and player 1 object
+            -- keys — lets the client hunt for score-ish APIs offline
             local attrNames = {}
-            for k, _ in pairs(PlayerAttribute) do
-                table.insert(attrNames, k)
-            end
-            send("api", { playerAttributes = attrNames })
+            pcall(function()
+                for k, _ in pairs(PlayerAttribute) do
+                    table.insert(attrNames, k)
+                end
+            end)
+            local classNames = {}
+            pcall(function()
+                for k, _ in pairs(UnitClass) do
+                    table.insert(classNames, k)
+                end
+            end)
+            table.sort(classNames)
+            local globals = {}
+            pcall(function()
+                for k, v in pairs(_G) do
+                    local tv = type(v)
+                    if tv == "function" or tv == "table" then
+                        table.insert(globals, k .. ":" .. tv)
+                    end
+                end
+                table.sort(globals)
+            end)
+            local pkeys = {}
+            pcall(function()
+                local p1 = GetPlayerById(1)
+                if p1 then
+                    for k, v in pairs(p1) do
+                        table.insert(pkeys, k .. ":" .. type(v))
+                    end
+                    table.sort(pkeys)
+                end
+            end)
+            send("api", { playerAttributes = attrNames,
+                          unitClasses = classNames,
+                          globals = globals, playerKeys = pkeys })
             send("ack", { action = action, on = mapMode })
         elseif action == "camera" and msg.x then
             SetCameraPosition(Vector2(msg.x, msg.y))
@@ -932,6 +964,29 @@ local function sample()
             end
         end
         local v, m = {}, {}
+        -- military class tags for the map animation: infantry/cavalry
+        -- get distinct dot sizes client-side (guarded: members may be
+        -- absent in older APIs). Scouts / cav archers / raiders live in
+        -- their own classes but play as cavalry -> tagged "c" too.
+        local tag = {}
+        local tagClasses = {
+            i = { "INFANTRY" },
+            c = { "CAVALRY", "SCOUT_CAVALRY", "CAVALRY_ARCHER",
+                  "CAVALRY_RAIDER" },
+        }
+        for t, names in pairs(tagClasses) do
+            for _, cn in ipairs(names) do
+                if UnitClass[cn] then
+                    pcall(function()
+                        local st = GetObjectStates(
+                            GetObjectsByClass(UnitClass[cn]))
+                        if st and st.id then
+                            for i = 1, #st.id do tag[st.id[i]] = t end
+                        end
+                    end)
+                end
+            end
+        end
         for id, u in pairs(now) do
             if u.playerId and u.playerId >= 1 then
                 table.insert(v, { id, u.playerId, u.unitType,
@@ -941,7 +996,7 @@ local function sample()
         for id, u in pairs(milNow) do
             if u.playerId and u.playerId >= 1 then
                 table.insert(m, { id, u.playerId, u.unitType,
-                                  round1(u.x), round1(u.y) })
+                                  round1(u.x), round1(u.y), tag[id] })
             end
         end
         send("objects", { b = b, v = v, m = m })
