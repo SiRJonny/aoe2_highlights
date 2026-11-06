@@ -80,6 +80,7 @@ let lastTs = null;
 // id -> row index maps for the two frames around the cursor (rebuilt on
 // frame change only — 1500 lookups/frame instead of 1500 inserts/frame)
 let idxA = null, idxB = null, idxI = -1;
+let bDed = null;          // buildings pruned of annexes/duplicate notables
 let statsI = -1;
 
 function fmtTime(s) {
@@ -119,6 +120,38 @@ function notableKindFor(typeName) {
   return null;
 }
 
+/* DE town centers are composites: the main building plus 3 annex wings,
+ * each a separate object one tile off the TC. All four names start with
+ * TOWN_CENTER, so drawing every notable stacks 4 icons on one TC. Drop
+ * the annexes and collapse same-owner same-kind notables within 3 tiles
+ * (completion re-ids the object, foundation row lingers) keeping the
+ * older id. Legit same-kind notables (TC next to TC) sit farther apart. */
+function pruneBuildings(rows) {
+  if (!Array.isArray(rows)) return [];
+  const out = [];
+  for (const r of rows) {
+    const name = meta.typeNames[r[2]] || "";
+    if (name.includes("_ANNEX")) continue;
+    const kind = notableKindFor(r[2]);
+    if (kind) {
+      let twin = null;
+      for (const q of out) {
+        if (q[1] === r[1] && notableKindFor(q[2]) === kind
+            && Math.abs(q[3] - r[3]) <= 3 && Math.abs(q[4] - r[4]) <= 3) {
+          twin = q;
+          break;
+        }
+      }
+      if (twin) {
+        if (r[0] < twin[0]) out[out.indexOf(twin)] = r;
+        continue;
+      }
+    }
+    out.push(r);
+  }
+  return out;
+}
+
 function draw() {
   if (!snaps.length) return;
   const w = canvas.width;
@@ -135,6 +168,7 @@ function draw() {
   if (idxI !== i || !idxA) {
     idxA = { b: idIndex(s0, "b"), m: idIndex(s0, "m"), v: idIndex(s0, "v") };
     idxB = { b: idIndex(s1, "b"), m: idIndex(s1, "m"), v: idIndex(s1, "v") };
+    bDed = pruneBuildings(s0.b);
     idxI = i;
   }
 
@@ -176,7 +210,7 @@ function draw() {
       drawBuilding(kind, x, y, size, color, row[2]);
     }
   };
-  layer(s0.b, idxA.b, idxB.b, "bld", false);
+  layer(bDed, idxA.b, idxB.b, "bld", false);
   layer(s0.m, idxA.m, idxB.m, "unit", true);
   layer(s0.v, idxA.v, idxB.v, "vill", true);
 
