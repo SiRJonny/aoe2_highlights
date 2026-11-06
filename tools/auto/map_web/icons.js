@@ -28,7 +28,7 @@ const EMOJI_ICONS = {
   donjon: "\u{1F3DB}\uFE0F",                 // 🏛 classical building
   fortified_church: "\u26EA",                // ⛪ church
   feitoria: "\u{1F3E4}",                     // 🏤 post / trade office
-  tower: "\u{1F5FC}",                        // 🗼 tower
+  tower: "\u{1F3DB}\uFE0F",                  // 🏛 same as donjon
 };
 
 /* Vector painters: design box is 24x24 centered on (12,12); the app
@@ -106,19 +106,11 @@ const VECTOR_ICONS = {
     ctx.fillStyle = "#fff";
     ctx.fillRect(19, 2, 4, 2.6);
   },
-  tower(ctx) {
-    ctx.beginPath();
-    ctx.rect(7, 9, 10, 12);
-    ctx.rect(5.5, 6, 13, 4);
-    ctx.rect(5.5, 3, 3, 4);
-    ctx.rect(10.5, 3, 3, 4);
-    ctx.rect(15.5, 3, 3, 4);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(10.6, 14, 2.8, 7);
-  },
 };
+
+// towers reuse the donjon silhouette (the dedicated tower painter read
+// too heavy on the map)
+VECTOR_ICONS.tower = VECTOR_ICONS.donjon;
 
 /* Cavalry marker: small horse/rider silhouette (chess-knight profile).
  * Same 24x24 design box; the app scales it per dot. */

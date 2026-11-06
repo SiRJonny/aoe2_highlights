@@ -43,7 +43,6 @@ const NOTABLE = [
   ["GUARD_TOWER", "tower"],
   ["KEEP", "tower"],
   ["BOMBARD_TOWER", "tower"],
-  ["OUTPOST", "tower"],
 ];
 // draw order: plain buildings under, notable icons above them, villagers
 // next, military on top (sizes in world tiles)
