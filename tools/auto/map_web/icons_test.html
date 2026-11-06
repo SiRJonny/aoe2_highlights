@@ -16,8 +16,10 @@
 </head>
 <body>
 <h1 style="font-size:18px">Building icon options</h1>
+<div id="sizehint" style="color:#8aa08a;font-size:12px"></div>
 <div id="sets"></div>
-<h2>Unit dots (villager 0.5 / infantry / cavalry tiles at ~4.7 px/tile)</h2>
+<h2>Unit dots (villager / infantry / military / cavalry at ~4.7 px/tile) —
+<span class="qhint"></span></h2>
 <div id="units" class="dots"></div>
 <script src="/icons.js"></script>
 <script>
@@ -28,6 +30,21 @@ const SETS = ["square", "glyph", "emoji", "vector", "game"];
 const NAMES = { town_center: "Town Center", castle: "Castle",
                 krepost: "Krepost", donjon: "Donjon",
                 fortified_church: "Fortified Church", feitoria: "Feitoria" };
+
+// URL params, shared by the building rows and the unit rows below:
+//   ?sizes=8,12,16,20,24   example sizes for the building icon rows
+//   ?cav=1.45&inf=0.85&dot=1  unit dot multipliers (same as the app)
+const QS = new URLSearchParams(location.search);
+const qnum = (k, d) => {
+  const v = parseFloat(QS.get(k));
+  return v > 0 ? v : d;
+};
+const SIZES = (QS.get("sizes") || "").split(",")
+  .map((s) => parseFloat(s.trim()))
+  .filter((s) => s > 0 && s <= 200);
+if (!SIZES.length) SIZES.push(10, 14, 18, 24, 30);
+document.getElementById("sizehint").textContent =
+  "example sizes: " + SIZES.join(", ") + "  (?sizes=8,12,16,20,24)";
 
 function cell(size, painter) {
   const c = document.createElement("canvas");
@@ -48,6 +65,7 @@ function drawIcon(setName, kind, ctx, size) {
   if (setName === "vector" && icon) {
     ctx.save();
     ctx.scale(size / 24, size / 24);
+    ctx.translate(-12, -12);         // painters draw in a 24x24 box
     ctx.lineWidth = 2; ctx.lineJoin = "round";
     icon(ctx);
     ctx.restore();
@@ -86,7 +104,7 @@ for (const [kind, file] of Object.entries(ICON_SETS.game)) {
   gameImgs[kind] = im;
 }
 
-const SIZES = [10, 14, 18, 24, 30];
+
 
 function render() {
   const root = document.getElementById("sets");
@@ -121,14 +139,17 @@ function render() {
   }
 }
 
-// unit dots: villager 0.5, infantry 0.85x0.75, military 0.75, cavalry 1.45
-// tiles; on a 1080px canvas over a 231-tile map that is ~2.3/3/3.4/5 px
+// unit dots: villager 0.5, infantry, military, cavalry tiles; sizes come
+// from the same URL params as the app: ?cav= &inf= &dot=
+const infM = qnum("inf", 0.85), cavM = qnum("cav", 1.45), dotS = qnum("dot", 1);
+document.querySelector(".qhint").textContent =
+  "?cav=" + cavM + "&inf=" + infM + "&dot=" + dotS;
 const pxPerTile = 1080 / 231;
 const UNITS = [
-  ["villager 0.5", 0.5, null],
-  ["infantry", 0.75 * 0.85, null],
-  ["military", 0.75, null],
-  ["cavalry", 0.75 * 1.45, "#FF9205"],
+  ["villager 0.5", 0.5 * dotS, null],
+  ["infantry (x" + infM + ")", 0.75 * infM * dotS, null],
+  ["military", 0.75 * dotS, null],
+  ["cavalry (x" + cavM + ")", 0.75 * cavM * dotS, "#FF9205"],
 ];
 const ur = document.getElementById("units");
 for (const [name, tiles, colorOverride] of UNITS) {

@@ -62,3 +62,24 @@ body {
   border-radius: 4px; height: 28px;
 }
 #hint { color: #6a7a6a; padding-bottom: 8px; }
+/* right-side debug panel: live drawing-size sliders (toggle with d) */
+#dbg {
+  position: fixed; right: 10px; top: 50%; transform: translateY(-50%);
+  width: 195px; padding: 8px 10px; z-index: 5;
+  background: rgba(16, 22, 16, .92); border: 1px solid #2c352c;
+  border-radius: 4px; display: flex; flex-direction: column; gap: 5px;
+}
+#dbg.off { display: none; }
+#dbg .dhead {
+  color: #8aa08a; font-size: 11px; font-weight: 700; margin-top: 2px;
+  display: flex; justify-content: space-between; align-items: baseline;
+}
+#dbghide { cursor: pointer; color: #6a7a6a; padding: 0 3px; }
+#dbghide:hover { color: #fff; }
+#dbg .drow { display: flex; align-items: center; gap: 6px; }
+#dbg .drow label { width: 74px; color: #9fb49f; font-size: 11px;
+  white-space: nowrap; }
+#dbg .drow input[type=range] { flex: 1; height: 14px; }
+#dbg .dval { width: 4ch; text-align: right; color: #fff;
+  font-variant-numeric: tabular-nums; font-size: 11px; }
+#dbg .dfoot { color: #6a7a6a; font-size: 10px; }

@@ -27,7 +27,19 @@
     </select>
     <input id="seek" type="range" min="0" max="100" step="0.1" value="0">
   </div>
-  <div id="hint">space play/pause &middot; &larr;/&rarr; &plusmn;1s &middot; ?t=SECONDS starts there</div>
+  <div id="hint">space play/pause &middot; &larr;/&rarr; &plusmn;1s &middot; ?t=SECONDS starts there &middot; d = size panel</div>
+</div>
+<div id="dbg">
+  <div class="dhead">sizes (tiles) <span id="dbghide" title="hide (d)">&times;</span></div>
+  <div class="drow"><label>building</label><input type="range" min="0.5" max="4" step="0.05" data-size="bld"><span class="dval"></span></div>
+  <div class="drow"><label>notable</label><input type="range" min="1" max="5" step="0.1" data-size="notable"><span class="dval"></span></div>
+  <div class="drow"><label>military</label><input type="range" min="0.2" max="2" step="0.05" data-size="unit"><span class="dval"></span></div>
+  <div class="drow"><label>villager</label><input type="range" min="0.2" max="1.5" step="0.05" data-size="vill"><span class="dval"></span></div>
+  <div class="dhead">multipliers</div>
+  <div class="drow"><label>cavalry &times;</label><input type="range" min="0.5" max="3" step="0.05" data-size="cav"><span class="dval"></span></div>
+  <div class="drow"><label>infantry &times;</label><input type="range" min="0.3" max="2" step="0.05" data-size="inf"><span class="dval"></span></div>
+  <div class="drow"><label>all units &times;</label><input type="range" min="0.3" max="3" step="0.05" data-size="dot"><span class="dval"></span></div>
+  <div class="dfoot">d = show/hide</div>
 </div>
 <script src="/icons.js"></script>
 <script src="/app.js"></script>

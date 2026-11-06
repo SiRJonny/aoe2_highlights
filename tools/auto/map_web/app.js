@@ -14,7 +14,8 @@
  */
 "use strict";
 
-const tag = new URLSearchParams(location.search).get("tag") || "demo";
+const QS = new URLSearchParams(location.search);
+const tag = QS.get("tag") || "demo";
 const iconSet = new URLSearchParams(location.search).get("icons") || "glyph";
 // EXACT DE team colors, from the game's own
 // resources/_common/palettes/spritecolors.json ("TeamColors", 0-1 floats
@@ -39,10 +40,23 @@ const NOTABLE = [
   ["FORTIFIED_CHURCH", "fortified_church"],
   ["FEITORIA", "feitoria"],
 ];
-// draw order: big buildings under, units on top (sizes in world tiles)
-const LAYER_PX = 1.3, LAYER_UNIT = 0.75, LAYER_VILL = 0.5, NOTABLE_PX = 2.6;
-// military dots by class tag (Lua sends row[5] = "i"/"c" when it can)
-const UNIT_MULT = { c: 1.45, i: 0.85 };
+// draw order: big buildings under, units on top (sizes in world tiles).
+// Every value is live-tunable in the debug panel on the right (press d
+// to show/hide) and seedable by URL params:
+//   ?bld=1.3&notable=2.6&unit=0.75&vil=0.5&cav=1.45&inf=0.85&dot=1
+function qnum(k, d) {
+  const v = parseFloat(QS.get(k));
+  return v > 0 ? v : d;
+}
+const SIZES = {
+  bld: qnum("bld", 1.3),        // plain building square
+  notable: qnum("notable", 2.6),// notable building (icon) square
+  unit: qnum("unit", 0.75),     // military dot
+  vill: qnum("vil", 0.5),       // villager dot
+  cav: qnum("cav", 1.45),       // cavalry multiplier on unit
+  inf: qnum("inf", 0.85),       // infantry multiplier on unit
+  dot: qnum("dot", 1),          // extra multiplier on every unit dot
+};
 const AGE_ROMAN = ["I", "II", "III", "IV"];
 
 const canvas = document.getElementById("map");
@@ -135,7 +149,7 @@ function draw() {
 
   const toScreen = (x, y) => [(x + y) * s2, (D - x + y) * s2];
 
-  const layer = (rowsIn, from, to, px, circular) => {
+  const layer = (rowsIn, from, to, sizeKey, circular) => {
     const rows = Array.isArray(rowsIn) ? rowsIn : [];
     for (const row of rows) {
       const p = interp(from, to, row[0], f);
@@ -143,11 +157,13 @@ function draw() {
       const [x, y] = toScreen(p[0], p[1]);
       const color = colorOf(row[1]);
       const kind = circular ? null : notableKindFor(row[2]);
-      let size = (kind ? NOTABLE_PX : px) * tile;
+      let size = (kind ? SIZES.notable : SIZES[sizeKey]) * tile;
       if (circular) {
         // infantry vs cavalry: the Lua side tags row[5] where it can
-        const mult = UNIT_MULT[p[2] && p[2][5]] || 1;
-        size *= mult;
+        const tag5 = p[2] && p[2][5];
+        const mult = tag5 === "c" ? SIZES.cav
+                   : tag5 === "i" ? SIZES.inf : 1;
+        size *= mult * SIZES.dot;
         const r = size / 2;
         ctx.fillStyle = color;
         ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
@@ -160,9 +176,9 @@ function draw() {
       drawBuilding(kind, x, y, size, color, row[2]);
     }
   };
-  layer(s0.b, idxA.b, idxB.b, LAYER_PX, false);
-  layer(s0.m, idxA.m, idxB.m, LAYER_UNIT, true);
-  layer(s0.v, idxA.v, idxB.v, LAYER_VILL, true);
+  layer(s0.b, idxA.b, idxB.b, "bld", false);
+  layer(s0.m, idxA.m, idxB.m, "unit", true);
+  layer(s0.v, idxA.v, idxB.v, "vill", true);
 
   updateStrip();
   clockEl.textContent = fmtTime(t);
@@ -191,6 +207,7 @@ function drawBuilding(kind, x, y, size, color, typeName) {
     ctx.save();
     ctx.translate(x, y);
     ctx.scale(size / 24, size / 24);
+    ctx.translate(-12, -12);       // painters draw in a 24x24 box
     ctx.lineWidth = 2; ctx.lineJoin = "round";
     vec(ctx);
     ctx.restore();
@@ -337,6 +354,25 @@ function setPlaying(on) {
   playBtn.innerHTML = on ? "&#10074;&#10074;" : "&#9654;";
 }
 
+// debug size panel: sliders write straight into SIZES; the RAF loop
+// redraws every frame, so changes show immediately (even while paused)
+const dbgEl = document.getElementById("dbg");
+if (dbgEl) {
+  for (const input of dbgEl.querySelectorAll("input[type=range]")) {
+    const key = input.dataset.size;
+    input.value = SIZES[key];
+    const out = input.closest(".drow").querySelector(".dval");
+    out.textContent = SIZES[key];
+    input.oninput = () => {
+      const v = parseFloat(input.value);
+      if (v > 0) SIZES[key] = v;
+      out.textContent = v;
+    };
+  }
+  document.getElementById("dbghide").onclick = toggleDbg;
+}
+function toggleDbg() { if (dbgEl) dbgEl.classList.toggle("off"); }
+
 playBtn.onclick = () => {
   if (!playing && t >= snaps[snaps.length - 1].t) t = 0;
   setPlaying(!playing);
@@ -344,6 +380,7 @@ playBtn.onclick = () => {
 seekEl.oninput = () => { t = parseFloat(seekEl.value); };
 document.addEventListener("keydown", (e) => {
   if (e.code === "Space") { e.preventDefault(); playBtn.onclick(); }
+  else if (e.code === "KeyD") toggleDbg();
   else if (e.code === "ArrowRight") t = Math.min(t + 1, snaps.at(-1).t);
   else if (e.code === "ArrowLeft") t = Math.max(0, t - 1);
 });
