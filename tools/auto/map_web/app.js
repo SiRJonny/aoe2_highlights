@@ -2,26 +2,44 @@
  * snapshots. Data (per game-second, columnar [id, owner, unitType, x, y]):
  *   meta    {mapWidth, mapHeight, players:[{id,name}], typeNames}
  *   objects {b: buildings, v: villagers, m: military}
- * Buildings are drawn as squares (notable types get an icon), units as
- * dots in player colors. Frames interpolate between samples for smooth
- * movement; the slider seeks, the button/space plays.
+ *   stats   {stats: [[age,food,wood,stone,gold,pop,score?], ...]} per player
+ *   names   {names: {pid: {name, colorId}}} from the replay header
+ *
+ * Orientation matches the in-game minimap: the world is rotated 45
+ * degrees (north corner top, east right, south bottom, west left).
+ * Buildings are squares (notable ones larger with an icon glyph inside),
+ * units are dots, all in each player's real in-game color (mgz color_id
+ * from the replay header, falling back to slot defaults). The strip above
+ * the map mimics the in-game top bar: color, name, score, age.
  */
 "use strict";
 
 const tag = new URLSearchParams(location.search).get("tag") || "demo";
-const PLAYER_COLORS = {
-  1: "#4a7dff", 2: "#ff4a4a", 3: "#ffd24a", 4: "#ff8a2a",
-  5: "#37d2b8", 6: "#d24ae0", 7: "#c8c8c8", 8: "#b8ff4a",
-};
-const GAIA = "#9ab09a";
-const ICONS = [
-  ["TOWN_CENTER", "\u2302"],      // house-like glyph
-  ["CASTLE", "\u265e"],           // knight
-  ["KREPOST", "\u265e"],
+// DE lobby color indexes per mgz.reference: 0=Blue,1=Red,2=Green,3=Yellow,
+// 4=Teal,5=Purple,6=Gray,7=Orange
+const COLOR_ID_HEX = [
+  "#2C5AD8", "#C3332F", "#2E7D32", "#D9B426",
+  "#17A2A2", "#8A44B8", "#9E9E9E", "#E0801E",
 ];
-// draw order: big buildings under, units on top (sizes in tiles; the
-// demo's 120-tile map renders ~2x bigger than a 231-tile map)
-const LAYER_PX = 1.3, LAYER_UNIT = 0.75, LAYER_VILL = 0.5;
+// slot fallback when the replay header is unavailable (classic cycle:
+// blue red yellow green cyan purple gray orange)
+const SLOT_HEX = [
+  null,
+  COLOR_ID_HEX[0], COLOR_ID_HEX[1], COLOR_ID_HEX[3], COLOR_ID_HEX[2],
+  COLOR_ID_HEX[4], COLOR_ID_HEX[5], COLOR_ID_HEX[6], COLOR_ID_HEX[7],
+];
+const GAIA = "#9ab09a";
+const NOTABLE = [
+  ["TOWN_CENTER", "\u2302"],
+  ["CASTLE", "\u265c"],
+  ["KREPOST", "\u265c"],
+  ["DONJON", "\u265c"],
+  ["FORTIFIED_CHURCH", "\u271d"],
+  ["FEITORIA", "\u265c"],
+];
+// draw order: big buildings under, units on top (sizes in world tiles)
+const LAYER_PX = 1.3, LAYER_UNIT = 0.75, LAYER_VILL = 0.5, NOTABLE_PX = 2.6;
+const AGE_ROMAN = ["I", "II", "III", "IV"];
 
 const canvas = document.getElementById("map");
 const ctx = canvas.getContext("2d");
@@ -29,9 +47,13 @@ const playBtn = document.getElementById("play");
 const seekEl = document.getElementById("seek");
 const speedEl = document.getElementById("speed");
 const clockEl = document.getElementById("clock");
+const stripEl = document.getElementById("scorebar");
 
 let meta = null;          // latest meta row
 let snaps = [];           // [{t, b, v, m}]
+let statRows = [];        // [{t, stats}] (stats[i+1] = player i)
+let playerInfo = {};      // pid -> {name, colorId}
+let chips = [];           // {pid, scoreEl, ageEl}
 let bgImg = new Image();
 let bgReady = false;
 let playing = false;
@@ -40,10 +62,19 @@ let lastTs = null;
 // id -> row index maps for the two frames around the cursor (rebuilt on
 // frame change only — 1500 lookups/frame instead of 1500 inserts/frame)
 let idxA = null, idxB = null, idxI = -1;
+let statsI = -1;
 
 function fmtTime(s) {
   const m = Math.floor(s / 60), ss = Math.floor(s % 60);
   return m + ":" + String(ss).padStart(2, "0");
+}
+
+function colorOf(pid) {
+  const info = playerInfo[pid];
+  if (info && Number.isInteger(info.colorId) &&
+      COLOR_ID_HEX[info.colorId] !== undefined)
+    return COLOR_ID_HEX[info.colorId];
+  return SLOT_HEX[pid] || GAIA;
 }
 
 function idIndex(snap, layer) {
@@ -63,9 +94,9 @@ function interp(from, to, id, f) {
   return null;
 }
 
-function iconFor(typeName) {
+function notableFor(typeName) {
   const n = meta.typeNames[typeName] || "";
-  for (const [prefix, glyph] of ICONS)
+  for (const [prefix, glyph] of NOTABLE)
     if (n.startsWith(prefix)) return glyph;
   return null;
 }
@@ -73,7 +104,9 @@ function iconFor(typeName) {
 function draw() {
   if (!snaps.length) return;
   const w = canvas.width;
-  const scale = w / meta.mapWidth;
+  const D = meta.mapWidth;
+  const s2 = w / (2 * D);          // diagonal fit: diamond fills the square
+  const tile = w / D;              // world-tile screen size (for markers)
   // locate the two samples around t
   let i = 0;
   while (i + 1 < snaps.length && snaps[i + 1].t <= t) i++;
@@ -87,47 +120,91 @@ function draw() {
     idxI = i;
   }
 
+  // terrain: rotate the square map image 45 deg + fit so the world
+  // diamond touches the canvas edge midpoints (dark corners, in-game
+  // minimap look). Matrix = rotate 45 + scale 1/sqrt2.
+  ctx.setTransform(0.5, 0.5, -0.5, 0.5, w / 2, 0);
   if (bgReady) ctx.drawImage(bgImg, 0, 0, w, w);
   else { ctx.fillStyle = "#2d542d"; ctx.fillRect(0, 0, w, w); }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-  const layer = (rowsIn, from, to, px, outline, iconFn) => {
+  const toScreen = (x, y) => [(x - y + D) * s2, (x + y) * s2];
+
+  const layer = (rowsIn, from, to, px, circular) => {
     const rows = Array.isArray(rowsIn) ? rowsIn : [];
     for (const row of rows) {
       const p = interp(from, to, row[0], f);
       if (!p) continue;
-      const x = p[0] * scale, y = p[1] * scale;
-      const color = PLAYER_COLORS[row[1]] || GAIA;
-      if (iconFn) {
-        const glyph = iconFn(row[2]);
-        if (glyph) {
-          ctx.font = Math.round(px * 2.6 * scale) + "px serif";
+      const [x, y] = toScreen(p[0], p[1]);
+      const color = colorOf(row[1]);
+      const notable = circular ? null : notableFor(row[2]);
+      const size = (notable ? NOTABLE_PX : px) * tile;
+      const r = size / 2;
+      ctx.fillStyle = color;
+      ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
+      if (circular) {
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(1.1, r), 0, 6.2832);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.fillRect(x - r, y - r, size, size);
+        ctx.strokeRect(x - r, y - r, size, size);
+        if (notable) {
+          ctx.font = Math.round(size * 0.85) + "px serif";
           ctx.textAlign = "center"; ctx.textBaseline = "middle";
-          ctx.fillStyle = color;
-          ctx.fillText(glyph, x, y);
-          ctx.lineWidth = 1; ctx.strokeStyle = "#000";
-          ctx.strokeText(glyph, x, y);
-          continue;
+          ctx.fillStyle = "#fff";
+          ctx.fillText(notable, x, y);
+          ctx.strokeText(notable, x, y);
         }
       }
-      const r = px * scale / 2;
-      ctx.fillStyle = color;
-      if (px >= LAYER_PX) {          // buildings: minimap-style squares
-        ctx.fillRect(x - r, y - r, r * 2, r * 2);
-        ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.7)";
-        ctx.strokeRect(x - r, y - r, r * 2, r * 2);
-        continue;
-      }
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, 6.2832);
-      ctx.fill();
-      if (outline) { ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.7)"; ctx.stroke(); }
     }
   };
-  layer(s0.b, idxA.b, idxB.b, LAYER_PX, false, iconFor);
-  layer(s0.m, idxA.m, idxB.m, LAYER_UNIT, true, null);
-  layer(s0.v, idxA.v, idxB.v, LAYER_VILL, false, null);
+  layer(s0.b, idxA.b, idxB.b, LAYER_PX, false);
+  layer(s0.m, idxA.m, idxB.m, LAYER_UNIT, true);
+  layer(s0.v, idxA.v, idxB.v, LAYER_VILL, true);
 
+  updateStrip();
   clockEl.textContent = fmtTime(t);
+}
+
+// in-game-style top strip: per player color chip + name + pop + age
+// (the engine exposes no score attribute — probed PlayerAttribute.SCORE,
+// absent in this API — so the strip shows the top bar's pop/age columns)
+function updateStrip() {
+  let i = statsI;
+  while (i + 1 < statRows.length && statRows[i + 1].t <= t) i++;
+  if (i === statsI) return;
+  statsI = i;
+  if (i < 0) return;
+  const stats = statRows[i].stats;
+  for (const chip of chips) {
+    const row = Array.isArray(stats) ? stats[chip.pid] : null;
+    chip.popEl.textContent = row && Number.isFinite(row[5]) ? row[5] : "";
+    chip.ageEl.textContent =
+      row && row[0] >= 0 && row[0] <= 3 ? AGE_ROMAN[row[0]] : "";
+  }
+}
+
+function buildStrip() {
+  stripEl.innerHTML = "";
+  chips = [];
+  for (const p of meta.players) {
+    if (p.id < 1 || p.id > 8) continue;
+    const chip = document.createElement("span");
+    chip.className = "pchip";
+    const name = (playerInfo[p.id] && playerInfo[p.id].name) ||
+      ("P" + p.id);
+    chip.innerHTML = "<span class='pdot' style='background:" +
+      colorOf(p.id) + "'></span><span class='pname'></span>" +
+      "<span class='ppop'></span><span class='page'></span>";
+    chip.querySelector(".pname").textContent = name;
+    stripEl.appendChild(chip);
+    chips.push({ pid: p.id,
+                 popEl: chip.querySelector(".ppop"),
+                 ageEl: chip.querySelector(".page") });
+  }
+  statsI = -1;
 }
 
 function loop(ts) {
@@ -154,7 +231,6 @@ playBtn.onclick = () => {
   setPlaying(!playing);
 };
 seekEl.oninput = () => { t = parseFloat(seekEl.value); };
-speedEl.onchange = () => {};
 document.addEventListener("keydown", (e) => {
   if (e.code === "Space") { e.preventDefault(); playBtn.onclick(); }
   else if (e.code === "ArrowRight") t = Math.min(t + 1, snaps.at(-1).t);
@@ -180,25 +256,18 @@ async function load() {
     const r = JSON.parse(line);
     if (r.type === "meta") lastMeta = r;
     else if (r.type === "map") mapName = r.name;
+    else if (r.type === "names") playerInfo = r.names || {};
     else if (r.type === "objects")
       snaps.push({ t: r.time, b: r.b, v: r.v, m: r.m });
+    else if (r.type === "stats") statRows.push({ t: r.time, stats: r.stats });
   }
   meta = lastMeta;
   if (!meta || !snaps.length)
     throw new Error("no usable rows in the positions file");
   meta.mapName = mapName;
   document.getElementById("mapname").textContent =
-    tag + (meta.mapName ? " \u2014 " + meta.mapName : "");
-  const pl = document.getElementById("players");
-  for (const p of meta.players) {
-    if (p.id < 1 || p.id > 8) continue;
-    const chip = document.createElement("span");
-    chip.className = "pchip";
-    chip.innerHTML = "<span class='pdot' style='background:" +
-      (PLAYER_COLORS[p.id] || GAIA) + "'></span>" +
-      (p.name || ("P" + p.id));
-    pl.appendChild(chip);
-  }
+    (meta.mapName ? meta.mapName + " \u2014 " : "") + tag;
+  buildStrip();
   const end = snaps[snaps.length - 1].t;
   seekEl.max = end;
   const t0 = parseFloat(new URLSearchParams(location.search).get("t"));

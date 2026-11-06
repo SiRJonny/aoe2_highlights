@@ -797,6 +797,16 @@ local function sampleStats()
             if not ok then
                 row = nil
             end
+            if ok then
+                -- engine score (top-bar points); guarded: older APIs may
+                -- lack PlayerAttribute.SCORE -> row stays 6 long
+                local ok2, score = pcall(function()
+                    return p:GetAttribute(PlayerAttribute.SCORE)
+                end)
+                if ok2 and score then
+                    row[7] = score
+                end
+            end
             table.insert(rows, row)
         else
             table.insert(rows, nil)

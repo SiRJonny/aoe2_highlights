@@ -59,7 +59,8 @@ def collect_positions(handle, positions_path, max_minutes):
 
     Requires the module's map_mode ON ({"action":"map_mode"}); keeps the
     meta row (players, map size, type names), the per-sample objects
-    snapshots and tc_snap, drops everything else. Ends on the same
+    snapshots, tc_snap and stats (age/resources/pop/score per player),
+    drops everything else. Ends on the same
     20-s no-advance stall as collect (replay ended)."""
     # NOTE: no pre-read after set_speed — rows arriving in that window
     # (a fresh map_mode's meta + tc_snap) are DATA; the loop below
@@ -75,7 +76,7 @@ def collect_positions(handle, positions_path, max_minutes):
         while time.time() < deadline:
             for r in drive.read_for(handle, 5, quiet=True):
                 rt = r.get("type")
-                if rt not in ("meta", "objects", "tc_snap"):
+                if rt not in ("meta", "objects", "tc_snap", "stats"):
                     continue
                 t = r.get("time")
                 if t and (last_t is None or t > last_t):

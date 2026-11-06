@@ -80,9 +80,13 @@ def main():
     if replay_path and Path(replay_path).exists():
         png, name = terrain.render_replay_png(replay_path,
                                               tag_dir / "map.png")
+        names = terrain.player_info(replay_path)
         with open(pos_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps({"type": "map", "name": name}) + "\n")
-        capture.log(f"terrain -> {png} (map: {name})")
+            if names:
+                fh.write(json.dumps({"type": "names", "names": names}) + "\n")
+        capture.log(f"terrain -> {png} (map: {name}, "
+                    f"{sum(1 for _ in names)} named players)")
     else:
         capture.log("WARNING: no replay file -- terrain image skipped "
                     "(webapp falls back to flat background)")

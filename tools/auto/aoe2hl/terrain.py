@@ -60,6 +60,28 @@ def render_tiles_png(tiles, dimension, out_png, px=MAP_PX):
     return out_png
 
 
+def player_info(replay_path):
+    """player number -> {name, colorId} from the replay's mgz header.
+
+    colorId is the DE lobby color index (0=Blue,1=Red,2=Green,3=Yellow,
+    4=Teal,5=Purple,6=Gray,7=Orange per mgz.reference) — the color the
+    player actually used in-game, which need not match their slot.
+    Empty dict when the header can't be parsed."""
+    try:
+        import mgz.summary as mgz_summary
+        with open(replay_path, "rb") as fh:
+            summ = mgz_summary.Summary(fh)
+            info = {}
+            for pl in summ.get_players():
+                if not pl.get("human"):
+                    continue
+                info[pl["number"]] = {"name": pl["name"],
+                                      "colorId": pl["color_id"]}
+            return info
+    except Exception:                        # noqa: BLE001
+        return {}
+
+
 def render_replay_png(replay_path, out_png, px=MAP_PX):
     """Terrain PNG + map name from a replay file; returns (png, name).
 

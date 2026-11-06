@@ -10,21 +10,21 @@
   <span id="mapname">loading...</span>
   <span id="clock">0:00</span>
 </div>
+<div id="scorebar"></div>
 <canvas id="map" width="1080" height="1080"></canvas>
 <div id="bar">
   <button id="play">&#9654;</button>
   <select id="speed">
-    <option value="0.5">0.5&times;</option>
-    <option value="1" selected>1&times;</option>
+    <option value="1">1&times;</option>
     <option value="2">2&times;</option>
     <option value="4">4&times;</option>
-    <option value="8">8&times;</option>
+    <option value="8" selected>8&times;</option>
     <option value="16">16&times;</option>
+    <option value="32">32&times;</option>
   </select>
   <input id="seek" type="range" min="0" max="100" step="0.1" value="0">
-  <span id="players"></span>
 </div>
-<div id="hint">space play/pause &middot; &larr;/&rarr; &plusmn;1s &middot; click map: nothing (yet)</div>
+<div id="hint">space play/pause &middot; &larr;/&rarr; &plusmn;1s &middot; ?t=SECONDS starts there</div>
 <script src="/app.js"></script>
 </body>
 </html>

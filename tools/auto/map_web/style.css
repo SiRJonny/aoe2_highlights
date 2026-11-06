@@ -8,8 +8,24 @@ body {
 }
 #top {
   width: 100%; display: flex; justify-content: space-between;
-  padding: 6px 14px; font-weight: 600;
+  padding: 6px 14px 2px; font-weight: 600;
 }
+#scorebar {
+  width: min(92vh, 96vw, 1080px); display: flex; flex-wrap: wrap;
+  gap: 4px 14px; padding: 4px 2px 6px;
+}
+#scorebar .pchip {
+  display: inline-flex; align-items: baseline; gap: 5px;
+  background: #1a221a; border: 1px solid #2c352c; border-radius: 4px;
+  padding: 1px 7px;
+}
+#scorebar .pdot {
+  width: 10px; height: 10px; border-radius: 3px; display: inline-block;
+  align-self: center; border: 1px solid rgba(0,0,0,.6);
+}
+#scorebar .pname { font-weight: 600; }
+#scorebar .ppop { font-weight: 700; color: #fff; min-width: 2ch; }
+#scorebar .page { color: #8aa08a; font-size: 11px; min-width: 2ch; }
 #map {
   width: min(92vh, 96vw, 1080px); height: min(92vh, 96vw, 1080px);
   image-rendering: pixelated; background: #0a0f0a;
@@ -29,6 +45,5 @@ body {
   border-radius: 4px; height: 28px;
 }
 #players { display: flex; gap: 10px; flex-wrap: wrap; }
-.pchip { display: inline-flex; align-items: center; gap: 4px; }
 .pdot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 #hint { color: #6a7a6a; padding-bottom: 8px; }

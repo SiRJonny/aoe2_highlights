@@ -67,6 +67,12 @@ def main():
             "players": players, "sampleInterval": 1.0,
             "typeNames": TYPE_NAMES,
         }) + "\n")
+        fh.write(json.dumps({
+            "type": "names",
+            "names": {"1": {"name": "Alice", "colorId": 0},
+                      "2": {"name": "Bob", "colorId": 7},
+                      "3": {"name": "Carol", "colorId": 5}},
+        }) + "\n")
 
         for t in range(SECS + 1):
             b, v, m = [], [], []
@@ -97,6 +103,14 @@ def main():
             if t == 60:
                 dead[1] = {0}            # one casualty each side
                 dead[2] = {2}
+            age = 0 if t < 40 else (1 if t < 80 else 2)
+            stats = [None]
+            for p in (1, 2, 3):
+                stats.append([age, 800 + t * 12, 600 + t * 9,
+                              200 + t * 2, 350 + t * 5, 25 + t // 10,
+                              1200 + t * 14 + p * 40])
+            fh.write(json.dumps({"type": "stats", "time": t,
+                                 "stats": stats}) + "\n")
             fh.write(json.dumps({
                 "type": "objects", "time": t, "b": b, "v": v, "m": m,
             }) + "\n")
