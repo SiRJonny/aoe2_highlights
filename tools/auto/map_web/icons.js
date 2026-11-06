@@ -107,14 +107,15 @@ const VECTOR_ICONS = {
   },
 };
 
-/* Real DE building icons (community-extracted renders). Kinds with null
- * have no clean icon — the app falls back to the glyph square. */
+/* Real DE building renders (aoe2db.com). Kinds with null have no clean
+ * render anywhere — the game's own TC icon is a villager portrait, so
+ * those kinds fall back to the vector silhouette, then the glyph. */
 const GAME_ICONS = {
   town_center: null,
   castle: "/icons/castle.png",
   krepost: "/icons/krepost.png",
   donjon: "/icons/donjon.png",
-  fortified_church: null,
+  fortified_church: "/icons/fortified_church.png",
   feitoria: null,
 };
 

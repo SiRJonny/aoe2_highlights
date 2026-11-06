@@ -62,24 +62,23 @@ function drawIcon(setName, kind, ctx, size) {
   const r = size / 2;
   ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
   ctx.fillStyle = color;
-  if (setName === "vector" && icon) {
+  const im = setName === "game" && icon ? gameImgs[kind] : null;
+  const haveImg = im && im.complete && im.naturalWidth > 0;
+  if (setName === "vector" && icon
+      || setName === "game" && !haveImg && ICON_SETS.vector[kind]) {
     ctx.save();
     ctx.scale(size / 24, size / 24);
     ctx.translate(-12, -12);         // painters draw in a 24x24 box
     ctx.lineWidth = 2; ctx.lineJoin = "round";
-    icon(ctx);
+    (icon || ICON_SETS.vector[kind])(ctx);
     ctx.restore();
     return;
   }
-  if (setName === "game" && icon) {
-    const im = gameImgs[kind];
-    if (im && im.complete && im.naturalWidth > 0) {
-      ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.2832);
-      ctx.fillStyle = "rgba(10,14,10,.72)"; ctx.fill(); ctx.stroke();
-      ctx.drawImage(im, -r, -r, size, size);
-      return;
-    }
-    return drawIcon("glyph", kind, ctx, size);
+  if (setName === "game" && haveImg) {
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.2832);
+    ctx.fillStyle = "rgba(10,14,10,.72)"; ctx.fill(); ctx.stroke();
+    ctx.drawImage(im, -r, -r, size, size);
+    return;
   }
   ctx.fillRect(-r, -r, size, size);
   ctx.strokeRect(-r, -r, size, size);
@@ -122,8 +121,9 @@ function render() {
       row.appendChild(lbl);
       const icon = ICON_SETS[setName][kind];
       const covered = setName === "vector" ? !!icon :
-        setName === "game" ? !!(icon && gameImgs[kind] &&
-          gameImgs[kind].complete && gameImgs[kind].naturalWidth > 0) :
+        setName === "game" ? !!(ICON_SETS.vector[kind] ||
+          (icon && gameImgs[kind] && gameImgs[kind].complete &&
+           gameImgs[kind].naturalWidth > 0)) :
         true;
       for (const s of SIZES) {
         row.appendChild(cell(s, (ctx) => drawIcon(setName, kind, ctx, s)));
@@ -131,7 +131,7 @@ function render() {
       if (!covered) {
         const miss = document.createElement("span");
         miss.className = "miss";
-        miss.textContent = "no game icon - glyph fallback";
+        miss.textContent = "no icon at all";
         row.appendChild(miss);
       }
       root.appendChild(row);

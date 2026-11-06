@@ -234,9 +234,11 @@ function drawBuilding(kind, x, y, size, color, typeName) {
   const r = size / 2;
   ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
   ctx.fillStyle = color;
-  const vec = iconSet === "vector" && kind && ICON_SETS.vector[kind];
   const img = iconSet === "game" && kind && gameImgs[kind];
   const useGame = img && img.complete && img.naturalWidth > 0;
+  const vec = kind && ICON_SETS.vector[kind]
+    && (iconSet === "vector" || (iconSet === "game" && !useGame))
+    ? ICON_SETS.vector[kind] : null;
   if (vec) {
     ctx.save();
     ctx.translate(x, y);
