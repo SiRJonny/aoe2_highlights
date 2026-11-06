@@ -11,6 +11,10 @@ body {
   display: flex; flex-direction: column; gap: 10px;
 }
 #mapname { font-weight: 600; color: #9fb49f; }
+#scorelabel {
+  color: #6a7a6a; font-size: 10px; text-transform: uppercase;
+  letter-spacing: .08em;
+}
 #scorebar { display: flex; flex-direction: column; gap: 8px; }
 #scorebar .tgroup {
   background: #1a221a; border: 1px solid #2c352c; border-radius: 4px;

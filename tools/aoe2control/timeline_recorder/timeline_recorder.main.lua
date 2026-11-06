@@ -451,6 +451,70 @@ local function handleCommands()
             send("api", { playerAttributes = attrNames,
                           unitClasses = classNames,
                           globals = globals, playerKeys = pkeys })
+
+            -- second probe: the score-hunting tables. Fact and
+            -- ResourceTracker member names, SnapshotPlayer fields, named
+            -- access attempts on the player object, GetUnitTypeCount
+            -- signature samples, GetFact name samples. All pcall-guarded;
+            -- results let the client decide between a real score and an
+            -- eco-count fallback.
+            local function keys(t)
+                local out = {}
+                pcall(function()
+                    for k, v in pairs(t) do
+                        table.insert(out, k .. ":" .. type(v))
+                    end
+                    table.sort(out)
+                end)
+                return out
+            end
+            local factKeys = keys(Fact)
+            local rtKeys = keys(ResourceTracker)
+            local spKeys = keys(SnapshotPlayer)
+            local plKeys = keys(Player)
+            local pNamed = {}
+            pcall(function()
+                local p1 = GetPlayerById(1)
+                if p1 then
+                    for _, name in ipairs({ "Score", "Scores", "GetScore",
+                                            "GetFacts", "Facts", "Resources",
+                                            "GetResources", "Gathered",
+                                            "Stats", "GetStats", "GetFact",
+                                            "ScoreValue", "GetAttributes" }) do
+                        local ok, v = pcall(function() return p1[name] end)
+                        if ok and v ~= nil then
+                            table.insert(pNamed, name .. ":" .. type(v))
+                        end
+                    end
+                end
+            end)
+            table.sort(pNamed)
+            local utc = {}
+            pcall(function()
+                table.insert(utc, "p1t83=" .. tostring(GetUnitTypeCount(1, 83)))
+            end)
+            pcall(function()
+                table.insert(utc, "t83=" .. tostring(GetUnitTypeCount(83)))
+            end)
+            pcall(function()
+                table.insert(utc, "p1villager="
+                    .. tostring(GetUnitTypeCount(1, UnitObjectType.VILLAGER)))
+            end)
+            local factSamples = {}
+            pcall(function()
+                for _, name in ipairs({ "PlayerScore", "Score", "Scores",
+                                        "ResourcesGathered", "GatheredFood",
+                                        "PlayerKills", "MilitaryScore" }) do
+                    local ok, v = pcall(function() return GetFact(name) end)
+                    if ok then
+                        table.insert(factSamples, name .. "=" .. tostring(v))
+                    end
+                end
+            end)
+            send("api2", { factKeys = factKeys, resourceTracker = rtKeys,
+                           snapshotPlayer = spKeys, playerTable = plKeys,
+                           playerNamed = pNamed, unitTypeCount = utc,
+                           factSamples = factSamples })
             send("ack", { action = action, on = mapMode })
         elseif action == "camera" and msg.x then
             SetCameraPosition(Vector2(msg.x, msg.y))
@@ -855,7 +919,9 @@ local function sampleStats()
 end
 
 local function sample()
-    -- villager census (v1 behaviour)
+    -- villager census (v1 behaviour); fishing ships and trade carts/
+    -- cogs join the census (flagged eco=true) so the client can show an
+    -- exact "eco count" per player
     local states = GetObjectStates(GetObjectsByClass(UnitClass.VILLAGER))
     local counts = {}
     local now = {}
@@ -868,6 +934,23 @@ local function sample()
                               playerId = states.playerId[i],
                               unitType = states.unitType[i] }
     end
+    pcall(function()
+        local es = GetObjectStates(GetObjectsByClasses({
+            UnitClass.FISHING_SHIP, UnitClass.TRADE_CART,
+            UnitClass.TRADE_COG }))
+        if es and es.id then
+            for i = 1, #es.id do
+                local pid = es.playerId[i]
+                if pid and pid >= 0 then
+                    counts[pid] = (counts[pid] or 0) + 1
+                end
+                now[es.id[i]] = { x = es.x[i], y = es.y[i],
+                                  playerId = pid,
+                                  unitType = es.unitType[i],
+                                  eco = true }
+            end
+        end
+    end)
     send("vill_pop", { counts = counts })
 
     -- villager death: id present last sample, gone now; position is the
@@ -1006,7 +1089,8 @@ local function sample()
         for id, u in pairs(now) do
             if u.playerId and u.playerId >= 1 then
                 table.insert(v, { id, u.playerId, u.unitType,
-                                  round1(u.x), round1(u.y) })
+                                  round1(u.x), round1(u.y),
+                                  u.eco and "e" or nil })
             end
         end
         for id, u in pairs(milNow) do

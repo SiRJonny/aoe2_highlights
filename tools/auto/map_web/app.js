@@ -83,6 +83,7 @@ let lastTs = null;
 // frame change only — 1500 lookups/frame instead of 1500 inserts/frame)
 let idxA = null, idxB = null, idxI = -1;
 let bPlain = null, bNotable = null;   // buildings split for draw order
+let curEco = {};          // eco count (villagers + fishers + traders)
 let statsI = -1;
 
 function fmtTime(s) {
@@ -176,6 +177,7 @@ function draw() {
     const bDed = pruneBuildings(s0.b);
     bNotable = bDed.filter((r) => notableKindFor(r[2]));
     bPlain = bDed.filter((r) => !notableKindFor(r[2]));
+    curEco = s0.eco || {};
     idxI = i;
   }
 
@@ -270,13 +272,12 @@ function drawBuilding(kind, x, y, size, color) {
   }
 }
 
-// in-game-style left panel: teams sorted by total score (descending),
-// players sorted by score within their team, each row score + color +
-// name + pop + age. The replay carries no per-player score value (the
-// Lua API has no PlayerAttribute.SCORE and this DE version embeds no
-// score in its sync packets), so the score column shows the player's
-// current total resources — the number the in-game economy score is
-// built from — and ordering mirrors that.
+// in-game-style left panel: teams sorted by total eco count (descending),
+// players sorted within their team, each row eco count + color + name +
+// pop + age. "Eco count" = villagers + fishing ships + trade carts/cogs,
+// the recorder's census; the DE replay and modding API carry no score
+// value (verified: sync packets are time increments only, PlayerAttribute
+// has no score), so no score approximation is shown.
 function updateStrip() {
   let i = statsI;
   while (i + 1 < statRows.length && statRows[i + 1].t <= t) i++;
@@ -286,13 +287,12 @@ function updateStrip() {
   const stats = statRows[i].stats;
   for (const chip of chips) {
     const row = Array.isArray(stats) ? stats[chip.pid] : null;
-    const res = row ? [1, 2, 3, 4].reduce((s2, k) =>
-      s2 + (Number.isFinite(row[k]) ? row[k] : 0), 0) : null;
-    chip.scoreEl.textContent = res === null ? "" : Math.round(res);
+    const eco = curEco[chip.pid];
+    chip.scoreEl.textContent = eco === undefined ? "" : eco;
     chip.popEl.textContent = row && Number.isFinite(row[5]) ? row[5] : "";
     chip.ageEl.textContent =
       row && row[0] >= 0 && row[0] <= 3 ? AGE_ROMAN[row[0]] : "";
-    chip.score = res;
+    chip.score = eco === undefined ? null : eco;
   }
   // re-order rows: teams by total score desc, players by score desc
   const teams = {};
@@ -439,8 +439,13 @@ async function load() {
     if (r.type === "meta") lastMeta = r;
     else if (r.type === "map") mapName = r.name;
     else if (r.type === "names") playerInfo = r.names || {};
-    else if (r.type === "objects")
-      snaps.push({ t: r.time, b: r.b, v: r.v, m: r.m });
+    else if (r.type === "objects") {
+      const eco = {};
+      if (Array.isArray(r.v))
+        for (const row of r.v)
+          eco[row[1]] = (eco[row[1]] || 0) + 1;
+      snaps.push({ t: r.time, b: r.b, v: r.v, m: r.m, eco });
+    }
     else if (r.type === "stats") statRows.push({ t: r.time, stats: r.stats });
   }
   meta = lastMeta;
