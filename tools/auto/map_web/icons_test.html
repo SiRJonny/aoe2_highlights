@@ -25,11 +25,12 @@
 <script>
 "use strict";
 const KINDS = ["town_center", "castle", "krepost", "donjon",
-               "fortified_church", "feitoria"];
-const SETS = ["square", "glyph", "emoji", "vector", "game"];
+               "fortified_church", "feitoria", "tower"];
+const SETS = ["square", "glyph", "emoji", "vector"];
 const NAMES = { town_center: "Town Center", castle: "Castle",
                 krepost: "Krepost", donjon: "Donjon",
-                fortified_church: "Fortified Church", feitoria: "Feitoria" };
+                fortified_church: "Fortified Church", feitoria: "Feitoria",
+                tower: "Tower" };
 
 // URL params, shared by the building rows and the unit rows below:
 //   ?sizes=8,12,16,20,24   example sizes for the building icon rows
@@ -62,22 +63,13 @@ function drawIcon(setName, kind, ctx, size) {
   const r = size / 2;
   ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
   ctx.fillStyle = color;
-  const im = setName === "game" && icon ? gameImgs[kind] : null;
-  const haveImg = im && im.complete && im.naturalWidth > 0;
-  if (setName === "vector" && icon
-      || setName === "game" && !haveImg && ICON_SETS.vector[kind]) {
+  if (setName === "vector" && icon) {
     ctx.save();
     ctx.scale(size / 24, size / 24);
     ctx.translate(-12, -12);         // painters draw in a 24x24 box
     ctx.lineWidth = 2; ctx.lineJoin = "round";
-    (icon || ICON_SETS.vector[kind])(ctx);
+    icon(ctx);
     ctx.restore();
-    return;
-  }
-  if (setName === "game" && haveImg) {
-    ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.2832);
-    ctx.fillStyle = "rgba(10,14,10,.72)"; ctx.fill(); ctx.stroke();
-    ctx.drawImage(im, -r, -r, size, size);
     return;
   }
   ctx.fillRect(-r, -r, size, size);
@@ -93,18 +85,6 @@ function drawIcon(setName, kind, ctx, size) {
   }
 }
 
-// preload game icons like the app does
-const gameImgs = {};
-for (const [kind, file] of Object.entries(ICON_SETS.game)) {
-  if (!file) continue;
-  const im = new Image();
-  im.onload = () => render();
-  im.src = file;
-  gameImgs[kind] = im;
-}
-
-
-
 function render() {
   const root = document.getElementById("sets");
   root.innerHTML = "";
@@ -119,20 +99,8 @@ function render() {
       lbl.className = "lbl";
       lbl.textContent = NAMES[kind];
       row.appendChild(lbl);
-      const icon = ICON_SETS[setName][kind];
-      const covered = setName === "vector" ? !!icon :
-        setName === "game" ? !!(ICON_SETS.vector[kind] ||
-          (icon && gameImgs[kind] && gameImgs[kind].complete &&
-           gameImgs[kind].naturalWidth > 0)) :
-        true;
       for (const s of SIZES) {
         row.appendChild(cell(s, (ctx) => drawIcon(setName, kind, ctx, s)));
-      }
-      if (!covered) {
-        const miss = document.createElement("span");
-        miss.className = "miss";
-        miss.textContent = "no icon at all";
-        row.appendChild(miss);
       }
       root.appendChild(row);
     }
@@ -146,13 +114,14 @@ document.querySelector(".qhint").textContent =
   "?cav=" + cavM + "&inf=" + infM + "&dot=" + dotS;
 const pxPerTile = 1080 / 231;
 const UNITS = [
-  ["villager 0.5", 0.5 * dotS, null],
-  ["infantry (x" + infM + ")", 0.75 * infM * dotS, null],
-  ["military", 0.75 * dotS, null],
-  ["cavalry (x" + cavM + ")", 0.75 * cavM * dotS, "#FF9205"],
+  ["villager 0.5", 0.5 * dotS, "dot", null],
+  ["infantry (x" + infM + ")", 0.75 * infM * dotS, "dot", null],
+  ["military", 0.75 * dotS, "dot", null],
+  ["cavalry silhouette (x" + cavM + ")", 0.75 * cavM * dotS, "horse",
+   "#FF9205"],
 ];
 const ur = document.getElementById("units");
-for (const [name, tiles, colorOverride] of UNITS) {
+for (const [name, tiles, mode, colorOverride] of UNITS) {
   const row = document.createElement("div");
   row.className = "row";
   const lbl = document.createElement("span");
@@ -160,8 +129,25 @@ for (const [name, tiles, colorOverride] of UNITS) {
   lbl.textContent = name + "  (" + (tiles * pxPerTile).toFixed(1) + "px)";
   row.appendChild(lbl);
   for (const mult of [0.6, 0.8, 1.0, 1.2]) {
-    row.appendChild(cell(Math.max(2, tiles * pxPerTile * mult), (ctx) => {
-      const s = Math.max(2, tiles * pxPerTile * mult);
+    const s = Math.max(2, tiles * pxPerTile * mult);
+    if (mode === "horse") {
+      // silhouette box = 2.2x the dot size, like app.js; bigger cell
+      const c = document.createElement("canvas");
+      const box = s * 2.2;
+      c.width = box + 8; c.height = box + 8;
+      const ctx = c.getContext("2d");
+      ctx.translate(4 + box / 2, 4 + box / 2);
+      ctx.save();
+      ctx.scale(box / 24, box / 24);
+      ctx.translate(-12, -12);
+      ctx.lineWidth = 2; ctx.lineJoin = "round";
+      ctx.strokeStyle = "rgba(0,0,0,.75)";
+      CAVALRY_SHAPE(ctx, colorOverride || "#0000FF");
+      ctx.restore();
+      row.appendChild(c);
+      continue;
+    }
+    row.appendChild(cell(s, (ctx) => {
       const r = s / 2;
       ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
       ctx.fillStyle = colorOverride || "#0000FF";

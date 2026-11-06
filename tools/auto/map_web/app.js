@@ -16,7 +16,7 @@
 
 const QS = new URLSearchParams(location.search);
 const tag = QS.get("tag") || "demo";
-const iconSet = new URLSearchParams(location.search).get("icons") || "glyph";
+const iconSet = QS.get("icons") || "vector";
 // EXACT DE team colors, from the game's own
 // resources/_common/palettes/spritecolors.json ("TeamColors", 0-1 floats
 // x255): blue red green yellow teal purple gray orange.
@@ -39,18 +39,21 @@ const NOTABLE = [
   ["DONJON", "donjon"],
   ["FORTIFIED_CHURCH", "fortified_church"],
   ["FEITORIA", "feitoria"],
+  ["WATCH_TOWER", "tower"],
+  ["GUARD_TOWER", "tower"],
+  ["KEEP", "tower"],
+  ["BOMBARD_TOWER", "tower"],
+  ["OUTPOST", "tower"],
 ];
-// draw order: big buildings under, units on top (sizes in world tiles).
-// Every value is live-tunable in the debug panel on the right (press d
-// to show/hide) and seedable by URL params:
-//   ?bld=1.3&notable=2.6&unit=0.75&vil=0.5&cav=1.45&inf=0.85&dot=1
+// draw order: plain buildings under, notable icons above them, villagers
+// next, military on top (sizes in world tiles)
 function qnum(k, d) {
   const v = parseFloat(QS.get(k));
   return v > 0 ? v : d;
 }
 const SIZES = {
   bld: qnum("bld", 1.3),        // plain building square
-  notable: qnum("notable", 2.6),// notable building (icon) square
+  notable: qnum("notable", 5),  // notable building (icon) square
   unit: qnum("unit", 0.75),     // military dot
   vill: qnum("vil", 0.5),       // villager dot
   cav: qnum("cav", 1.45),       // cavalry multiplier on unit
@@ -80,7 +83,7 @@ let lastTs = null;
 // id -> row index maps for the two frames around the cursor (rebuilt on
 // frame change only — 1500 lookups/frame instead of 1500 inserts/frame)
 let idxA = null, idxB = null, idxI = -1;
-let bDed = null;          // buildings pruned of annexes/duplicate notables
+let bPlain = null, bNotable = null;   // buildings split for draw order
 let statsI = -1;
 
 function fmtTime(s) {
@@ -123,9 +126,10 @@ function notableKindFor(typeName) {
 /* DE town centers are composites: the main building plus 3 annex wings,
  * each a separate object one tile off the TC. All four names start with
  * TOWN_CENTER, so drawing every notable stacks 4 icons on one TC. Drop
- * the annexes and collapse same-owner same-kind notables within 3 tiles
- * (completion re-ids the object, foundation row lingers) keeping the
- * older id. Legit same-kind notables (TC next to TC) sit farther apart. */
+ * the annexes and collapse same-owner same-kind notables within a small
+ * radius (completion re-ids the object, foundation row lingers) keeping
+ * the older id. Radius 3 tiles for footprint buildings, 1.5 for 1x1
+ * towers; legit same-kind notables sit farther apart. */
 function pruneBuildings(rows) {
   if (!Array.isArray(rows)) return [];
   const out = [];
@@ -134,10 +138,12 @@ function pruneBuildings(rows) {
     if (name.includes("_ANNEX")) continue;
     const kind = notableKindFor(r[2]);
     if (kind) {
+      const rad = kind === "tower" ? 1.5 : 3;
       let twin = null;
       for (const q of out) {
         if (q[1] === r[1] && notableKindFor(q[2]) === kind
-            && Math.abs(q[3] - r[3]) <= 3 && Math.abs(q[4] - r[4]) <= 3) {
+            && Math.abs(q[3] - r[3]) <= rad
+            && Math.abs(q[4] - r[4]) <= rad) {
           twin = q;
           break;
         }
@@ -168,7 +174,9 @@ function draw() {
   if (idxI !== i || !idxA) {
     idxA = { b: idIndex(s0, "b"), m: idIndex(s0, "m"), v: idIndex(s0, "v") };
     idxB = { b: idIndex(s1, "b"), m: idIndex(s1, "m"), v: idIndex(s1, "v") };
-    bDed = pruneBuildings(s0.b);
+    const bDed = pruneBuildings(s0.b);
+    bNotable = bDed.filter((r) => notableKindFor(r[2]));
+    bPlain = bDed.filter((r) => !notableKindFor(r[2]));
     idxI = i;
   }
 
@@ -198,6 +206,18 @@ function draw() {
         const mult = tag5 === "c" ? SIZES.cav
                    : tag5 === "i" ? SIZES.inf : 1;
         size *= mult * SIZES.dot;
+        if (tag5 === "c") {
+          // small horse silhouette; its box may exceed the dot footprint
+          ctx.save();
+          ctx.translate(x, y);
+          const box = size * 2.2;
+          ctx.scale(box / 24, box / 24);
+          ctx.translate(-12, -12);
+          ctx.lineWidth = 2; ctx.lineJoin = "round";
+          CAVALRY_SHAPE(ctx, color);
+          ctx.restore();
+          continue;
+        }
         const r = size / 2;
         ctx.fillStyle = color;
         ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
@@ -207,12 +227,13 @@ function draw() {
         ctx.stroke();
         continue;
       }
-      drawBuilding(kind, x, y, size, color, row[2]);
+      drawBuilding(kind, x, y, size, color);
     }
   };
-  layer(bDed, idxA.b, idxB.b, "bld", false);
-  layer(s0.m, idxA.m, idxB.m, "unit", true);
+  layer(bPlain, idxA.b, idxB.b, "bld", false);
+  layer(bNotable, idxA.b, idxB.b, "notable", false);
   layer(s0.v, idxA.v, idxB.v, "vill", true);
+  layer(s0.m, idxA.m, idxB.m, "unit", true);
 
   updateStrip();
   clockEl.textContent = fmtTime(t);
@@ -220,25 +241,13 @@ function draw() {
 
 /* Buildings: dispatch to the selected icon set. Glyph/emoji draw a player-
  * colored square with the glyph on top; vector replaces the square with a
- * painted silhouette; game draws the real DE icon on a dark plate. Any
- * kind a set does not cover falls back to the glyph square. */
-const gameImgs = {};
-for (const [kind, file] of Object.entries(ICON_SETS.game)) {
-  if (!file) continue;
-  const im = new Image();
-  im.src = file;
-  gameImgs[kind] = im;
-}
-
-function drawBuilding(kind, x, y, size, color, typeName) {
+ * painted silhouette. Any kind a set does not cover falls back to the
+ * glyph square. */
+function drawBuilding(kind, x, y, size, color) {
   const r = size / 2;
   ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
   ctx.fillStyle = color;
-  const img = iconSet === "game" && kind && gameImgs[kind];
-  const useGame = img && img.complete && img.naturalWidth > 0;
-  const vec = kind && ICON_SETS.vector[kind]
-    && (iconSet === "vector" || (iconSet === "game" && !useGame))
-    ? ICON_SETS.vector[kind] : null;
+  const vec = kind && ICON_SETS.vector[kind];
   if (vec) {
     ctx.save();
     ctx.translate(x, y);
@@ -249,19 +258,9 @@ function drawBuilding(kind, x, y, size, color, typeName) {
     ctx.restore();
     return;
   }
-  if (useGame) {
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, 6.2832);
-    ctx.fillStyle = "rgba(10,14,10,.72)";
-    ctx.fill();
-    ctx.stroke();
-    ctx.drawImage(img, x - r, y - r, size, size);
-    return;
-  }
   ctx.fillRect(x - r, y - r, size, size);
   ctx.strokeRect(x - r, y - r, size, size);
-  const glyph = kind ? ICON_SETS[iconSet === "game" ? "glyph" : iconSet][kind]
-    : null;
+  const glyph = kind ? ICON_SETS[iconSet][kind] : null;
   if (glyph) {
     ctx.font = Math.round(size * (iconSet === "emoji" ? 0.72 : 0.85)) +
       "px serif";

@@ -25,7 +25,6 @@ STATIC = {
     "/style.css": ("style.css", "text/css; charset=utf-8"),
     "/icons_test.html": ("icons_test.html", "text/html; charset=utf-8"),
 }
-ICON_DIR = WEB / "icons"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -42,14 +41,6 @@ class Handler(BaseHTTPRequestHandler):
         if path in STATIC:
             name, ctype = STATIC[path]
             self._send((WEB / name).read_bytes(), ctype)
-            return
-        if path.startswith("/icons/"):
-            name = Path(path).name
-            f = ICON_DIR / name
-            if f.exists():
-                self._send(f.read_bytes(), "image/png")
-                return
-            self._send(b"no icon", "text/plain", 404)
             return
         if path.startswith("/api/data/"):
             tag = Path(path).name

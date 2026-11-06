@@ -957,6 +957,22 @@ local function sample()
                 end
             end
         end
+        -- walls live in their own UnitClass.WALL (not BUILDING) and only
+        -- leak into the BUILDING query intermittently -> built walls
+        -- vanished from snapshots; query them explicitly
+        local okw, wst = pcall(function()
+            return GetObjectStates(GetObjectsByClass(UnitClass.WALL))
+        end)
+        if okw and wst and wst.id then
+            for i = 1, #wst.id do
+                local pid = wst.playerId[i]
+                if pid and pid >= 1 and not bSeen[wst.id[i]] then
+                    bSeen[wst.id[i]] = true
+                    table.insert(b, { wst.id[i], pid, wst.unitType[i],
+                                      round1(wst.x[i]), round1(wst.y[i]) })
+                end
+            end
+        end
         for id, f in pairs(foundations) do
             if not bSeen[id] and f.playerId and f.playerId >= 1 then
                 table.insert(b, { id, f.playerId, f.unitType,

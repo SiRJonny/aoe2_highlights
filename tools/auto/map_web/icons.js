@@ -1,14 +1,13 @@
-/* Building icon options for the map animation (?icons=<name> picks one).
+/* Building/unit icon options for the map animation (?icons=<name>).
  *
  * Sets:  square  plain squares, no glyph
- *        glyph   square + unicode glyph (original look)
+ *        glyph   square + unicode glyph
  *        emoji   square + emoji glyph
  *        vector  hand-drawn mini silhouettes instead of squares
- *        game    real DE building icons (tools/auto/map_web/icons/)
  *
  * Every set is keyed by kind: town_center, castle, krepost, donjon,
- * fortified_church, feitoria. A set may return null for a kind — the
- * app.js then falls back to the glyph square.
+ * fortified_church, feitoria, tower. A set may return null for a kind —
+ * the app falls back to the glyph square then.
  */
 "use strict";
 
@@ -19,20 +18,22 @@ const GLYPH_ICONS = {
   donjon: "\u265c",
   fortified_church: "\u271d",
   feitoria: "\u265c",
+  tower: "\u265c",
 };
 
 const EMOJI_ICONS = {
   town_center: "\u{1F3E0}",                  // 🏠 house
   castle: "\u{1F3F0}",                       // 🏰 european castle
   krepost: "\u{1F3EF}",                      // 🏯 japanese castle
-  donjon: "\u{1F5FC}",                       // 🗼 tower
+  donjon: "\u{1F3DB}\uFE0F",                 // 🏛 classical building
   fortified_church: "\u26EA",                // ⛪ church
   feitoria: "\u{1F3E4}",                     // 🏤 post / trade office
+  tower: "\u{1F5FC}",                        // 🗼 tower
 };
 
-/* Vector painters: design box is 24x24, centered at (12, 12). The app
- * translates to the building position and scales before calling. Fill
- * color is the owner's player color; details render white on top. */
+/* Vector painters: design box is 24x24 centered on (12,12); the app
+ * scales and centers before calling. Fill color is the owner's player
+ * color; details render white on top. */
 const VECTOR_ICONS = {
   town_center(ctx) {
     ctx.beginPath();
@@ -105,18 +106,42 @@ const VECTOR_ICONS = {
     ctx.fillStyle = "#fff";
     ctx.fillRect(19, 2, 4, 2.6);
   },
+  tower(ctx) {
+    ctx.beginPath();
+    ctx.rect(7, 9, 10, 12);
+    ctx.rect(5.5, 6, 13, 4);
+    ctx.rect(5.5, 3, 3, 4);
+    ctx.rect(10.5, 3, 3, 4);
+    ctx.rect(15.5, 3, 3, 4);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(10.6, 14, 2.8, 7);
+  },
 };
 
-/* Real DE building renders (aoe2db.com). Kinds with null have no clean
- * render anywhere — the game's own TC icon is a villager portrait, so
- * those kinds fall back to the vector silhouette, then the glyph. */
-const GAME_ICONS = {
-  town_center: null,
-  castle: "/icons/castle.png",
-  krepost: "/icons/krepost.png",
-  donjon: "/icons/donjon.png",
-  fortified_church: "/icons/fortified_church.png",
-  feitoria: null,
+/* Cavalry marker: small horse/rider silhouette (chess-knight profile).
+ * Same 24x24 design box; the app scales it per dot. */
+const CAVALRY_SHAPE = (ctx, color) => {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(6.5, 21);                            // base left
+  ctx.lineTo(7.5, 15);                            // rump
+  ctx.quadraticCurveTo(7, 11, 9.5, 8.5);          // back into neck
+  ctx.lineTo(8.5, 6.5);                           // nape
+  ctx.lineTo(10, 3);                              // ear
+  ctx.lineTo(11.5, 4.5);                          // head top
+  ctx.lineTo(14, 4.8);                            // forehead
+  ctx.lineTo(17.5, 7.5);                          // muzzle
+  ctx.lineTo(16.8, 9.5);
+  ctx.lineTo(13.5, 9.8);                          // jaw
+  ctx.quadraticCurveTo(15.5, 13, 15.2, 16);       // chest
+  ctx.lineTo(17.5, 21);                           // base right
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(11.6, 6, 1.6, 1.6);                // eye
 };
 
 const ICON_SETS = {
@@ -124,5 +149,4 @@ const ICON_SETS = {
   glyph: GLYPH_ICONS,
   emoji: EMOJI_ICONS,
   vector: VECTOR_ICONS,
-  game: GAME_ICONS,
 };
