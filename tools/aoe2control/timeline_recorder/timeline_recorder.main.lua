@@ -970,36 +970,31 @@ local function sampleStats()
 
     -- chat capture: resign/defeat announcements arrive as system chat
     -- messages; forward each message with the game time so the client
-    -- can timestamp resignations exactly (unknown message shape is
-    -- sanitized: strings/numbers/booleans pass, rest is stringified)
+    -- can timestamp resignations exactly. GetNewChatMessages drains the
+    -- queue (GetAllChatMessages caps/evicts and stalls the count diff).
     pcall(function()
-        local msgs = GetAllChatMessages()
-        if type(msgs) ~= "table" or #msgs < chatSeen then
-            chatSeen = 0
-        end
-        if #msgs > chatSeen then
-            local out = {}
-            for i = chatSeen + 1, #msgs do
-                local m = msgs[i]
-                if type(m) == "table" then
-                    local clean = {}
-                    for k, v in pairs(m) do
-                        local tv = type(v)
-                        if tv == "string" or tv == "number"
-                            or tv == "boolean" then
-                            clean[k] = v
-                        else
-                            clean[k] = tostring(v)
-                        end
+        local msgs = GetNewChatMessages()
+        if type(msgs) ~= "table" or #msgs == 0 then return end
+        local out = {}
+        for i = 1, #msgs do
+            local m = msgs[i]
+            if type(m) == "table" then
+                local clean = {}
+                for k, v in pairs(m) do
+                    local tv = type(v)
+                    if tv == "string" or tv == "number"
+                        or tv == "boolean" then
+                        clean[k] = v
+                    else
+                        clean[k] = tostring(v)
                     end
-                    table.insert(out, clean)
-                else
-                    table.insert(out, { text = tostring(m) })
                 end
+                table.insert(out, clean)
+            else
+                table.insert(out, { text = tostring(m) })
             end
-            chatSeen = #msgs
-            send("chat", { time = GetGameTime(), msgs = out })
         end
+        send("chat", { time = GetGameTime(), msgs = out })
     end)
 
     -- real score per player when the Fact API cooperates (sent at the
