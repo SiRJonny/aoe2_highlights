@@ -86,6 +86,7 @@ let idxA = null, idxB = null, idxI = -1;
 let bPlain = null, bNotable = null;   // buildings split for draw order
 let curEco = {};          // eco count (villagers + fishers + traders)
 let scoresI = -1, curScores = null;   // real score rows, aligned to t
+let hasRealScore = false; // score rows exist (else eco count is shown)
 let dataHasHp = false;    // snapshot building rows carry hp (new data)
 let statsI = -1;
 
@@ -332,15 +333,23 @@ function updateStrip() {
     const row = Array.isArray(stats) ? stats[chip.pid] : null;
     const sc = curScores ? curScores.scores[chip.pid] : undefined;
     const eco = curEco[chip.pid];
-    const val = (sc !== undefined && sc !== null) ? sc
-      : (eco === undefined ? null : eco);
-    chip.scoreEl.textContent = val === null ? "" : val;
+    if (!hasRealScore) {
+      // API score unavailable: the eco count IS the number shown
+      chip.scoreEl.textContent = "";
+      chip.ecoEl.textContent = eco === undefined ? "" : eco;
+      chip.score = eco === undefined ? null : eco;
+    } else {
+      const val = (sc !== undefined && sc !== null) ? sc
+        : (eco === undefined ? null : eco);
+      chip.scoreEl.textContent = val === null ? "" : val;
+      chip.ecoEl.textContent = eco === undefined ? "" : eco;
+      chip.score = val;
+    }
     chip.popEl.textContent = row && Number.isFinite(row[5]) ? row[5] : "";
     chip.ageEl.innerHTML = row && row[0] >= 0 && row[0] <= 3
       ? "<img src=\"/ages/age_" + (row[0] + 1) + ".png\" alt=\"Age " +
         AGE_ROMAN[row[0]] + "\" title=\"Age " + AGE_ROMAN[row[0]] + "\">"
       : "";
-    chip.score = val;
     // resigned/defeated players: the PLAYER_IN_GAME fact flips to 0
     const out = !!(curScores && curScores.inGame &&
                    curScores.inGame[chip.pid] === 0);
@@ -363,11 +372,10 @@ function updateStrip() {
     for (const c of rows) body.appendChild(c.rowEl);
     const total = rows.reduce((s2, c) => s2 + (c.score ?? 0), 0);
     const tEl = group.querySelector(".tscore");
-    if (tEl) tEl.textContent = Math.round(total);
+    if (tEl) tEl.textContent = hasRealScore ? Math.round(total) : "";
     const teEl = group.querySelector(".teco");
     if (teEl) {
-      teEl.textContent = "eco " +
-        rows.reduce((s2, c) => s2 + (curEco[c.pid] || 0), 0);
+      teEl.textContent = rows.reduce((s2, c) => s2 + (curEco[c.pid] || 0), 0);
     }
   }
   const groups = [...stripEl.querySelectorAll(".tgroup")];
@@ -401,8 +409,8 @@ function buildStrip() {
       const head = document.createElement("div");
       head.className = "trow";
       head.innerHTML = "<span class='tname'></span>" +
-        "<span class='tmeta'><span class='tscore'></span>" +
-        "<span class='teco'></span></span>";
+        "<span class='tmeta'><span class='teco'></span>" +
+        "<span class='tscore'></span></span>";
       head.querySelector(".tname").textContent =
         key === "0" ? "FFA" : "Team " + key;
       group.appendChild(head);
@@ -417,13 +425,14 @@ function buildStrip() {
       rowEl.innerHTML = "<span class='pdot' style='background:" +
         colorOf(pid) + "'></span><span class='pname'></span>" +
         "<span class='ppop'></span><span class='page'></span>" +
-        "<span class='pscore'></span>";
+        "<span class='peco'></span><span class='pscore'></span>";
       const abbr = civAbbr(info.civ);
       rowEl.querySelector(".pname").textContent =
         (abbr ? "[" + abbr + "] " : "") + (info.name || ("P" + pid));
       body.appendChild(rowEl);
       chips.push({ pid, team: +key, score: null, out: false, rowEl,
                    scoreEl: rowEl.querySelector(".pscore"),
+                   ecoEl: rowEl.querySelector(".peco"),
                    popEl: rowEl.querySelector(".ppop"),
                    ageEl: rowEl.querySelector(".page") });
     }
@@ -521,8 +530,9 @@ async function load() {
     (meta.mapName ? meta.mapName + " \u2014 " : "") + tag;
   buildStrip();
   dataHasHp = snaps.some((s) => (s.b || []).some((r) => r.length >= 6));
+  hasRealScore = scoreRows.length > 0;
   document.getElementById("scorelabel").textContent =
-    scoreRows.length ? "score" : "eco count";
+    hasRealScore ? "score" : "score*";
   const end = snaps[snaps.length - 1].t;
   seekEl.max = end;
   const t0 = parseFloat(new URLSearchParams(location.search).get("t"));

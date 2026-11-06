@@ -6,15 +6,25 @@ body {
   display: flex; min-height: 100vh;
 }
 #left {
-  width: 240px; flex: 0 0 240px; padding: 10px 12px;
+  width: 272px; flex: 0 0 272px; padding: 10px 12px;
   border-right: 1px solid #2c352c;
   display: flex; flex-direction: column; gap: 10px;
 }
 #mapname { font-weight: 600; color: #9fb49f; }
-#scorelabel {
+#scorelabel { color: #8aa08a; }
+/* column-header row: shares the .prow flex template so labels sit over
+ * their columns */
+#colheads {
+  display: flex; align-items: baseline; gap: 6px;
   color: #6a7a6a; font-size: 10px; text-transform: uppercase;
-  letter-spacing: .08em;
+  letter-spacing: .06em;
 }
+#colheads .cdot { width: 10px; flex: 0 0 auto; }
+#colheads .cplayer { flex: 1; }
+#colheads .cpop { min-width: 3ch; text-align: right; }
+#colheads .cage { min-width: 22px; text-align: center; }
+#colheads .ceco { min-width: 3.5ch; text-align: right; }
+#colheads .cscore { min-width: 5.5ch; text-align: right; }
 #scorebar { display: flex; flex-direction: column; gap: 8px; }
 #scorebar .tgroup {
   background: #1a221a; border: 1px solid #2c352c; border-radius: 4px;
@@ -25,9 +35,11 @@ body {
   border-bottom: 1px solid #2c352c; padding-bottom: 2px; margin-bottom: 3px;
 }
 #scorebar .tname { color: #8aa08a; font-size: 11px; font-weight: 700; }
-#scorebar .tmeta { display: flex; gap: 7px; align-items: baseline; }
-#scorebar .tscore { font-weight: 700; color: #fff; }
-#scorebar .teco { color: #8aa08a; font-size: 11px; }
+#scorebar .tmeta { display: flex; gap: 6px; align-items: baseline; }
+#scorebar .teco { color: #8aa08a; font-size: 11px; font-weight: 700;
+  min-width: 3.5ch; text-align: right; font-variant-numeric: tabular-nums; }
+#scorebar .tscore { font-weight: 700; color: #fff;
+  min-width: 5.5ch; text-align: right; font-variant-numeric: tabular-nums; }
 #scorebar .prow {
   display: flex; align-items: baseline; gap: 6px; padding: 1px 0;
 }
@@ -40,12 +52,13 @@ body {
 }
 #scorebar .pscore { font-weight: 700; color: #fff; min-width: 5.5ch;
   text-align: right; font-variant-numeric: tabular-nums; }
+#scorebar .peco { color: #9fb49f; min-width: 3.5ch; text-align: right;
+  font-variant-numeric: tabular-nums; }
 #scorebar .pname { flex: 1; white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; }
 #scorebar .ppop { color: #cfd8cf; min-width: 3ch; text-align: right; }
-#scorebar .page { color: #8aa08a; font-size: 11px; min-width: 14px;
-  text-align: center; }
-#scorebar .page img { width: 13px; height: 13px; vertical-align: middle; }
+#scorebar .page { color: #8aa08a; min-width: 22px; text-align: center; }
+#scorebar .page img { width: 20px; height: 20px; vertical-align: middle; }
 #main {
   flex: 1; display: flex; flex-direction: column; align-items: center;
 }
