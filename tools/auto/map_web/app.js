@@ -55,8 +55,8 @@ const SIZES = {
   notable: qnum("notable", 5),  // notable building (icon) square
   unit: qnum("unit", 0.75),     // military dot
   vill: qnum("vil", 0.5),       // villager dot
-  cav: qnum("cav", 1.45),       // cavalry multiplier on unit
-  inf: qnum("inf", 0.85),       // infantry multiplier on unit
+  cav: qnum("cav", 3),          // cavalry multiplier (default = slider max)
+  inf: qnum("inf", 2),          // infantry multiplier (default = slider max)
   dot: qnum("dot", 1),          // extra multiplier on every unit dot
 };
 const AGE_ROMAN = ["I", "II", "III", "IV"];
@@ -86,6 +86,7 @@ let idxA = null, idxB = null, idxI = -1;
 let bPlain = null, bNotable = null;   // buildings split for draw order
 let curEco = {};          // eco count (villagers + fishers + traders)
 let scoresI = -1, curScores = null;   // real score rows, aligned to t
+let dataHasHp = false;    // snapshot building rows carry hp (new data)
 let statsI = -1;
 
 function fmtTime(s) {
@@ -99,6 +100,25 @@ function colorOf(pid) {
       COLOR_ID_HEX[info.colorId] !== undefined)
     return COLOR_ID_HEX[info.colorId];
   return SLOT_HEX[pid] || GAIA;
+}
+
+const civAbbr = (c) =>
+  (c || "").replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase();
+
+/* Unfinished buildings: hp below the type's max (or a foundation row
+ * without hp). maxHp lookup strips age/upgrade suffixes from the type
+ * name; BUILDING_HP comes from aoe2techtree (genie ids via the
+ * aoc-reference-data names). */
+const AGE_SUFFIX =
+  /_(DARK_AGE|FEUDAL_AGE|CASTLE_AGE|IMPERIAL_AGE|UPGRADED|BASE)$/;
+function maxHpFor(typeName) {
+  let n = (meta.typeNames[typeName] || "").toUpperCase();
+  for (;;) {
+    const m = n.match(AGE_SUFFIX);
+    if (!m) break;
+    n = n.slice(0, n.length - m[0].length);
+  }
+  return BUILDING_HP[n] || null;
 }
 
 function idIndex(snap, layer) {
@@ -204,20 +224,22 @@ function draw() {
       const kind = circular ? null : notableKindFor(row[2]);
       let size = (kind ? SIZES.notable : SIZES[sizeKey]) * tile;
       if (circular) {
-        // infantry vs cavalry: the Lua side tags row[5] where it can
+        // infantry vs cavalry vs warships: the Lua side tags row[5]
         const tag5 = p[2] && p[2][5];
         const mult = tag5 === "c" ? SIZES.cav
                    : tag5 === "i" ? SIZES.inf : 1;
         size *= mult * SIZES.dot;
-        if (tag5 === "c") {
-          // small horse silhouette; its box may exceed the dot footprint
+        if (tag5 === "c" || tag5 === "i" || tag5 === "s") {
+          // silhouette marker; its box may exceed the dot footprint
           ctx.save();
           ctx.translate(x, y);
           const box = size * 2.2;
           ctx.scale(box / 24, box / 24);
           ctx.translate(-12, -12);
           ctx.lineWidth = 2; ctx.lineJoin = "round";
-          CAVALRY_SHAPE(ctx, color);
+          if (tag5 === "c") CAVALRY_SHAPE(ctx, color);
+          else if (tag5 === "i") SOLDIER_SHAPE(ctx, color);
+          else SHIP_SHAPE(ctx, color);
           ctx.restore();
           continue;
         }
@@ -230,7 +252,7 @@ function draw() {
         ctx.stroke();
         continue;
       }
-      drawBuilding(kind, x, y, size, color);
+      drawBuilding(kind, x, y, size, color, row[6], row[2]);
     }
   };
   layer(bPlain, idxA.b, idxB.b, "bld", false);
@@ -245,9 +267,21 @@ function draw() {
 /* Buildings: dispatch to the selected icon set. Glyph/emoji draw a player-
  * colored square with the glyph on top; vector replaces the square with a
  * painted silhouette. Any kind a set does not cover falls back to the
- * glyph square. */
-function drawBuilding(kind, x, y, size, color) {
+ * glyph square. Buildings under construction (hp < max, or a foundation
+ * row) render translucent. */
+function drawBuilding(kind, x, y, size, color, hp, typeId) {
   const r = size / 2;
+  let alpha = 1;
+  if (dataHasHp) {
+    const tname = meta.typeNames[typeId] || "";
+    if (hp === undefined || hp === null || /_FOUNDATION/.test(tname)) {
+      alpha = 0.45;
+    } else {
+      const max = maxHpFor(typeId);
+      if (max && hp < max * 0.98) alpha = 0.45;
+    }
+  }
+  if (alpha < 1) ctx.globalAlpha = alpha;
   ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
   ctx.fillStyle = color;
   const vec = kind && ICON_SETS.vector[kind];
@@ -259,19 +293,20 @@ function drawBuilding(kind, x, y, size, color) {
     ctx.lineWidth = 2; ctx.lineJoin = "round";
     vec(ctx);
     ctx.restore();
-    return;
+  } else {
+    ctx.fillRect(x - r, y - r, size, size);
+    ctx.strokeRect(x - r, y - r, size, size);
+    const glyph = kind ? ICON_SETS[iconSet][kind] : null;
+    if (glyph) {
+      ctx.font = Math.round(size * (iconSet === "emoji" ? 0.72 : 0.85)) +
+        "px serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillStyle = "#fff";
+      ctx.fillText(glyph, x, y + size * 0.04);
+      ctx.strokeText(glyph, x, y + size * 0.04);
+    }
   }
-  ctx.fillRect(x - r, y - r, size, size);
-  ctx.strokeRect(x - r, y - r, size, size);
-  const glyph = kind ? ICON_SETS[iconSet][kind] : null;
-  if (glyph) {
-    ctx.font = Math.round(size * (iconSet === "emoji" ? 0.72 : 0.85)) +
-      "px serif";
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillStyle = "#fff";
-    ctx.fillText(glyph, x, y + size * 0.04);
-    ctx.strokeText(glyph, x, y + size * 0.04);
-  }
+  if (alpha < 1) ctx.globalAlpha = 1;
 }
 
 // in-game-style left panel: teams sorted by total score (descending),
@@ -280,26 +315,39 @@ function drawBuilding(kind, x, y, size, color) {
 // the API exposes it (auto-detected signature), otherwise the exact eco
 // count (villagers + fishing ships + trade units) — no approximation.
 function updateStrip() {
-  let i = statsI;
+  // cursors rebase when seeking backwards so scores/pop/age track t
+  let i = (statsI >= 0 && statRows[statsI] && statRows[statsI].t <= t)
+    ? statsI : -1;
   while (i + 1 < statRows.length && statRows[i + 1].t <= t) i++;
   if (i === statsI) return;
   statsI = i;
   if (i < 0) return;
-  while (scoresI + 1 < scoreRows.length && scoreRows[scoresI + 1].t <= t)
-    scoresI++;
-  curScores = scoresI >= 0 ? scoreRows[scoresI].scores : null;
+  let si = (scoresI >= 0 && scoreRows[scoresI] && scoreRows[scoresI].t <= t)
+    ? scoresI : -1;
+  while (si + 1 < scoreRows.length && scoreRows[si + 1].t <= t) si++;
+  scoresI = si;
+  curScores = si >= 0 ? scoreRows[si] : null;
   const stats = statRows[i].stats;
   for (const chip of chips) {
     const row = Array.isArray(stats) ? stats[chip.pid] : null;
-    const sc = curScores ? curScores[chip.pid] : undefined;
+    const sc = curScores ? curScores.scores[chip.pid] : undefined;
     const eco = curEco[chip.pid];
     const val = (sc !== undefined && sc !== null) ? sc
       : (eco === undefined ? null : eco);
     chip.scoreEl.textContent = val === null ? "" : val;
     chip.popEl.textContent = row && Number.isFinite(row[5]) ? row[5] : "";
-    chip.ageEl.textContent =
-      row && row[0] >= 0 && row[0] <= 3 ? AGE_ROMAN[row[0]] : "";
+    chip.ageEl.innerHTML = row && row[0] >= 0 && row[0] <= 3
+      ? "<img src=\"/ages/age_" + (row[0] + 1) + ".png\" alt=\"Age " +
+        AGE_ROMAN[row[0]] + "\" title=\"Age " + AGE_ROMAN[row[0]] + "\">"
+      : "";
     chip.score = val;
+    // resigned/defeated players: the PLAYER_IN_GAME fact flips to 0
+    const out = !!(curScores && curScores.inGame &&
+                   curScores.inGame[chip.pid] === 0);
+    if (chip.out !== out) {
+      chip.out = out;
+      chip.rowEl.classList.toggle("out", out);
+    }
   }
   // re-order rows: teams by total score desc, players by score desc
   const teams = {};
@@ -316,6 +364,11 @@ function updateStrip() {
     const total = rows.reduce((s2, c) => s2 + (c.score ?? 0), 0);
     const tEl = group.querySelector(".tscore");
     if (tEl) tEl.textContent = Math.round(total);
+    const teEl = group.querySelector(".teco");
+    if (teEl) {
+      teEl.textContent = "eco " +
+        rows.reduce((s2, c) => s2 + (curEco[c.pid] || 0), 0);
+    }
   }
   const groups = [...stripEl.querySelectorAll(".tgroup")];
   groups.sort((a, b) => {
@@ -348,7 +401,8 @@ function buildStrip() {
       const head = document.createElement("div");
       head.className = "trow";
       head.innerHTML = "<span class='tname'></span>" +
-        "<span class='tscore'></span>";
+        "<span class='tmeta'><span class='tscore'></span>" +
+        "<span class='teco'></span></span>";
       head.querySelector(".tname").textContent =
         key === "0" ? "FFA" : "Team " + key;
       group.appendChild(head);
@@ -357,16 +411,18 @@ function buildStrip() {
     body.className = "tbody";
     group.appendChild(body);
     for (const pid of members) {
+      const info = playerInfo[pid] || {};
       const rowEl = document.createElement("div");
       rowEl.className = "prow";
-      rowEl.innerHTML = "<span class='pscore'></span>" +
-        "<span class='pdot' style='background:" + colorOf(pid) +
-        "'></span><span class='pname'></span>" +
-        "<span class='ppop'></span><span class='page'></span>";
+      rowEl.innerHTML = "<span class='pdot' style='background:" +
+        colorOf(pid) + "'></span><span class='pname'></span>" +
+        "<span class='ppop'></span><span class='page'></span>" +
+        "<span class='pscore'></span>";
+      const abbr = civAbbr(info.civ);
       rowEl.querySelector(".pname").textContent =
-        (playerInfo[pid] && playerInfo[pid].name) || ("P" + pid);
+        (abbr ? "[" + abbr + "] " : "") + (info.name || ("P" + pid));
       body.appendChild(rowEl);
-      chips.push({ pid, team: +key, score: null, rowEl,
+      chips.push({ pid, team: +key, score: null, out: false, rowEl,
                    scoreEl: rowEl.querySelector(".pscore"),
                    popEl: rowEl.querySelector(".ppop"),
                    ageEl: rowEl.querySelector(".page") });
@@ -464,6 +520,7 @@ async function load() {
   document.getElementById("mapname").textContent =
     (meta.mapName ? meta.mapName + " \u2014 " : "") + tag;
   buildStrip();
+  dataHasHp = snaps.some((s) => (s.b || []).some((r) => r.length >= 6));
   document.getElementById("scorelabel").textContent =
     scoreRows.length ? "score" : "eco count";
   const end = snaps[snaps.length - 1].t;

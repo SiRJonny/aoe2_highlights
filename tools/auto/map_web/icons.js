@@ -112,6 +112,70 @@ const VECTOR_ICONS = {
 // too heavy on the map)
 VECTOR_ICONS.tower = VECTOR_ICONS.donjon;
 
+/* Infantry marker: foot soldier with spear and shield, pawn-like
+ * profile so it reads beside the cavalry horse at dot sizes. */
+const SOLDIER_SHAPE = (ctx, color) => {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(8.5, 21);                            // left foot
+  ctx.lineTo(8, 15);                              // hip left
+  ctx.lineTo(9.5, 9);                             // shoulder
+  ctx.quadraticCurveTo(9.5, 6.5, 11.5, 6);        // neck
+  ctx.arc(12, 4.2, 2.1, Math.PI * 0.9, Math.PI * 0.1, true); // head
+  ctx.lineTo(14.5, 9);                            // right shoulder
+  ctx.lineTo(16, 15);                             // hip right
+  ctx.lineTo(15.5, 21);                           // right foot
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // spear: shaft from ground up past the head, tip upper-left
+  ctx.beginPath();
+  ctx.moveTo(16.2, 21);
+  ctx.lineTo(6.2, 4.5);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(6.2, 4.5);
+  ctx.lineTo(4.2, 2);
+  ctx.lineTo(7.6, 2.6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // shield on the left arm with a white boss
+  ctx.beginPath();
+  ctx.arc(8.6, 14.5, 3.1, 0, 6.2832);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.arc(8.6, 14.5, 1.1, 0, 6.2832);
+  ctx.fill();
+};
+
+/* Warship marker: crescent hull with a white sail. */
+const SHIP_SHAPE = (ctx, color) => {
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.moveTo(12, 4);                              // sail
+  ctx.lineTo(17.5, 12.5);
+  ctx.lineTo(12, 12.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(3.5, 15);                            // hull
+  ctx.quadraticCurveTo(12, 21.5, 20.5, 15);
+  ctx.lineTo(18.5, 13);
+  ctx.lineTo(5.5, 13);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(12, 13);                             // mast
+  ctx.lineTo(12, 3.5);
+  ctx.stroke();
+};
+
 /* Cavalry marker: small horse/rider silhouette (chess-knight profile).
  * Same 24x24 design box; the app scales it per dot. */
 const CAVALRY_SHAPE = (ctx, color) => {

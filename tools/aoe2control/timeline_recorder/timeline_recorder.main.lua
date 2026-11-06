@@ -94,6 +94,12 @@ local function round1(v)
     return math.floor(v * 10 + 0.5) / 10
 end
 
+local function hp1(v)
+    -- hitpoints rounded to an int; nil when the column is missing
+    if type(v) ~= "number" then return nil end
+    return math.floor(v + 0.5)
+end
+
 local function isHouseType(ot)
     return houseTypes[ot] or false
 end
@@ -966,14 +972,25 @@ local function sampleStats()
     detectScoreSig()
     if scoreSig ~= "none" then
         local scores = {}
+        local inGame = {}
         for i = 1, count - 1 do
             local ok, v = pcall(scoreCall, i)
             if ok and type(v) == "number" then
                 scores[i] = math.floor(v + 0.5)
             end
+            -- PLAYER_IN_GAME fact: 1 while the player is still in the
+            -- game, 0 after resigning/defeat (client crosses them out)
+            local ok2, ing = pcall(function()
+                local p = GetPlayerById(i)
+                return p:GetFact(Fact.PLAYER_IN_GAME)
+            end)
+            if ok2 and ing ~= nil then
+                inGame[i] = (ing == true or ing == 1) and 1 or 0
+            end
         end
         if next(scores) then
-            send("scores", { scores = scores, sig = scoreSig })
+            send("scores", { scores = scores, inGame = inGame,
+                             sig = scoreSig })
         end
     end
 end
@@ -1096,7 +1113,8 @@ local function sample()
                     local id = cst.id[i]
                     bSeen[id] = true
                     table.insert(b, { id, pid, cst.unitType[i],
-                                      round1(cst.x[i]), round1(cst.y[i]) })
+                                      round1(cst.x[i]), round1(cst.y[i]),
+                                      hp1(cst.hitpoints[i]) })
                 end
             end
         end
@@ -1112,14 +1130,16 @@ local function sample()
                 if pid and pid >= 1 and not bSeen[wst.id[i]] then
                     bSeen[wst.id[i]] = true
                     table.insert(b, { wst.id[i], pid, wst.unitType[i],
-                                      round1(wst.x[i]), round1(wst.y[i]) })
+                                      round1(wst.x[i]), round1(wst.y[i]),
+                                      hp1(wst.hitpoints[i]) })
                 end
             end
         end
         for id, f in pairs(foundations) do
             if not bSeen[id] and f.playerId and f.playerId >= 1 then
                 table.insert(b, { id, f.playerId, f.unitType,
-                                  round1(f.x), round1(f.y) })
+                                  round1(f.x), round1(f.y),
+                                  f.hp and hp1(f.hp) or nil })
             end
         end
         local v, m = {}, {}
@@ -1159,6 +1179,21 @@ local function sample()
                                   round1(u.x), round1(u.y), tag[id] })
             end
         end
+        -- warships: navy is excluded from the army census, so capture
+        -- them here for the map (tag "s" -> ship silhouette client-side)
+        pcall(function()
+            local nst = GetObjectStates(GetObjectsByClass(UnitClass.WARSHIP))
+            if nst and nst.id then
+                for i = 1, #nst.id do
+                    local pid = nst.playerId[i]
+                    if pid and pid >= 1 then
+                        table.insert(m, { nst.id[i], pid, nst.unitType[i],
+                                          round1(nst.x[i]), round1(nst.y[i]),
+                                          "s" })
+                    end
+                end
+            end
+        end)
         send("objects", { b = b, v = v, m = m })
     end
     if not snapSent then

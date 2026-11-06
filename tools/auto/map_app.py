@@ -22,8 +22,13 @@ STATIC = {
     "/index.html": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/icons.js": ("icons.js", "text/javascript; charset=utf-8"),
+    "/hp.js": ("hp.js", "text/javascript; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
     "/icons_test.html": ("icons_test.html", "text/html; charset=utf-8"),
+    "/ages/age_1.png": ("ages/age_1.png", "image/png"),
+    "/ages/age_2.png": ("ages/age_2.png", "image/png"),
+    "/ages/age_3.png": ("ages/age_3.png", "image/png"),
+    "/ages/age_4.png": ("ages/age_4.png", "image/png"),
 }
 
 

@@ -109,16 +109,18 @@ function render() {
 
 // unit dots: villager 0.5, infantry, military, cavalry tiles; sizes come
 // from the same URL params as the app: ?cav= &inf= &dot=
-const infM = qnum("inf", 0.85), cavM = qnum("cav", 1.45), dotS = qnum("dot", 1);
+const infM = qnum("inf", 2), cavM = qnum("cav", 3), dotS = qnum("dot", 1);
 document.querySelector(".qhint").textContent =
   "?cav=" + cavM + "&inf=" + infM + "&dot=" + dotS;
 const pxPerTile = 1080 / 231;
 const UNITS = [
   ["villager 0.5", 0.5 * dotS, "dot", null],
-  ["infantry (x" + infM + ")", 0.75 * infM * dotS, "dot", null],
   ["military", 0.75 * dotS, "dot", null],
+  ["infantry silhouette (x" + infM + ")", 0.75 * infM * dotS, "soldier",
+   null],
   ["cavalry silhouette (x" + cavM + ")", 0.75 * cavM * dotS, "horse",
    "#FF9205"],
+  ["warship silhouette", 0.75 * dotS, "ship", null],
 ];
 const ur = document.getElementById("units");
 for (const [name, tiles, mode, colorOverride] of UNITS) {
@@ -130,7 +132,7 @@ for (const [name, tiles, mode, colorOverride] of UNITS) {
   row.appendChild(lbl);
   for (const mult of [0.6, 0.8, 1.0, 1.2]) {
     const s = Math.max(2, tiles * pxPerTile * mult);
-    if (mode === "horse") {
+    if (mode !== "dot") {
       // silhouette box = 2.2x the dot size, like app.js; bigger cell
       const c = document.createElement("canvas");
       const box = s * 2.2;
@@ -142,7 +144,10 @@ for (const [name, tiles, mode, colorOverride] of UNITS) {
       ctx.translate(-12, -12);
       ctx.lineWidth = 2; ctx.lineJoin = "round";
       ctx.strokeStyle = "rgba(0,0,0,.75)";
-      CAVALRY_SHAPE(ctx, colorOverride || "#0000FF");
+      if (mode === "horse") CAVALRY_SHAPE(ctx, colorOverride || "#0000FF");
+      else if (mode === "soldier")
+        SOLDIER_SHAPE(ctx, colorOverride || "#0000FF");
+      else SHIP_SHAPE(ctx, colorOverride || "#0000FF");
       ctx.restore();
       row.appendChild(c);
       continue;

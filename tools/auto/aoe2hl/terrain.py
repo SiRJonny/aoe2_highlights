@@ -77,13 +77,32 @@ def render_tiles_png(tiles, dimension, out_png, px=MAP_PX):
     return out_png
 
 
+# Civilization names by mgz header index — the game's own
+# dat/civilizations.json civilization_list (index 0 = Gaia), snapshot
+# from the local DE install so no game files are needed at runtime.
+CIVS = [
+    "Gaia", "Britons", "Franks", "Goths", "Teutons", "Japanese", "Chinese",
+    "Byzantines", "Persians", "Saracens", "Turks", "Vikings", "Mongols",
+    "Celts", "Spanish", "Aztecs", "Mayans", "Huns", "Koreans", "Italians",
+    "Indians", "Incas", "Magyars", "Slavs", "Portuguese", "Ethiopians",
+    "Malians", "Berbers", "Khmer", "Malay", "Burmese", "Vietnamese",
+    "Bulgarians", "Tatars", "Cumans", "Lithuanians", "Burgundians",
+    "Sicilians", "Poles", "Bohemians", "Dravidians", "Bengalis", "Gurjaras",
+    "Romans", "Armenians", "Georgians", "Achaemenids", "Athenians",
+    "Spartans", "Shu", "Wu", "Wei", "Jurchens", "Khitans", "Macedonians",
+    "Thracians", "Puru", "Muisca", "Mapuche", "Tupi", "Saxons",
+    "Varangians", "Danes",
+]
+
+
 def player_info(replay_path):
-    """player number -> {name, colorId, team} from the replay's mgz header.
+    """player number -> {name, colorId, team, civ} from the mgz header.
 
     colorId is the DE lobby color index (0=Blue,1=Red,2=Green,3=Yellow,
     4=Teal,5=Purple,6=Gray,7=Orange per mgz.reference) — the color the
     player actually used in-game, which need not match their slot.
     team is the team number from the lobby (players grouped as in-game).
+    civ is the civilization name (CIVS lookup, empty when unknown).
     Empty dict when the header can't be parsed."""
     try:
         import mgz.summary as mgz_summary
@@ -97,9 +116,13 @@ def player_info(replay_path):
             for pl in summ.get_players():
                 if not pl.get("human"):
                     continue
+                civ_idx = pl.get("civilization")
+                civ = CIVS[civ_idx] if isinstance(civ_idx, int) \
+                    and 0 <= civ_idx < len(CIVS) else ""
                 info[pl["number"]] = {"name": pl["name"],
                                       "colorId": pl["color_id"],
-                                      "team": team_of.get(pl["number"], 0)}
+                                      "team": team_of.get(pl["number"], 0),
+                                      "civ": civ}
             return info
     except Exception:                        # noqa: BLE001
         return {}
