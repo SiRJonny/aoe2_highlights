@@ -890,6 +890,41 @@ local function trackKeyBuildings()
     tcSeen = seen
 end
 
+-- score capture: auto-detect the GetFact signature that returns a
+-- number for Fact.CURRENT_SCORE ("method" = player:GetFact(fact),
+-- "fp" = GetFact(fact, pid), "pf" = GetFact(pid, fact)); "none" when
+-- nothing works -> the client falls back to its eco count
+local scoreSig = nil
+local function scoreCall(pid)
+    local factIdx = Fact.CURRENT_SCORE
+    if scoreSig == "method" then
+        local p = GetPlayerById(pid)
+        return p:GetFact(factIdx)
+    elseif scoreSig == "fp" then
+        return GetFact(factIdx, pid)
+    elseif scoreSig == "pf" then
+        return GetFact(pid, factIdx)
+    end
+    error("no signature")
+end
+
+local function detectScoreSig()
+    if scoreSig then return end
+    local ok, factIdx = pcall(function() return Fact.CURRENT_SCORE end)
+    if not ok or type(factIdx) ~= "number" then
+        scoreSig = "none"
+        return
+    end
+    for _, sig in ipairs({ "method", "fp", "pf" }) do
+        scoreSig = sig
+        local ok2, v = pcall(scoreCall, 1)
+        if ok2 and type(v) == "number" then
+            return
+        end
+    end
+    scoreSig = "none"
+end
+
 local function sampleStats()
     -- per player: age, food, wood, stone, gold, pop current
     local rows = {}
@@ -925,6 +960,22 @@ local function sampleStats()
         end
     end
     send("stats", { stats = rows })
+
+    -- real score per player when the Fact API cooperates (sent at the
+    -- stats cadence so the client can align both by time)
+    detectScoreSig()
+    if scoreSig ~= "none" then
+        local scores = {}
+        for i = 1, count - 1 do
+            local ok, v = pcall(scoreCall, i)
+            if ok and type(v) == "number" then
+                scores[i] = math.floor(v + 0.5)
+            end
+        end
+        if next(scores) then
+            send("scores", { scores = scores, sig = scoreSig })
+        end
+    end
 end
 
 local function sample()

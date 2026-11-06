@@ -70,8 +70,9 @@ const clockEl = document.getElementById("clock");
 const stripEl = document.getElementById("scorebar");
 
 let meta = null;          // latest meta row
-let snaps = [];           // [{t, b, v, m}]
+let snaps = [];           // [{t, b, v, m, eco}]
 let statRows = [];        // [{t, stats}] (stats[i] = player i)
+let scoreRows = [];       // [{t, scores}] real score per player (API)
 let playerInfo = {};      // pid -> {name, colorId, team}
 let chips = [];           // {pid, scoreEl, ageEl}
 let bgImg = new Image();
@@ -84,6 +85,7 @@ let lastTs = null;
 let idxA = null, idxB = null, idxI = -1;
 let bPlain = null, bNotable = null;   // buildings split for draw order
 let curEco = {};          // eco count (villagers + fishers + traders)
+let scoresI = -1, curScores = null;   // real score rows, aligned to t
 let statsI = -1;
 
 function fmtTime(s) {
@@ -272,27 +274,32 @@ function drawBuilding(kind, x, y, size, color) {
   }
 }
 
-// in-game-style left panel: teams sorted by total eco count (descending),
-// players sorted within their team, each row eco count + color + name +
-// pop + age. "Eco count" = villagers + fishing ships + trade carts/cogs,
-// the recorder's census; the DE replay and modding API carry no score
-// value (verified: sync packets are time increments only, PlayerAttribute
-// has no score), so no score approximation is shown.
+// in-game-style left panel: teams sorted by total score (descending),
+// players sorted within their team, each row score + color + name +
+// pop + age. Score = the game's own Fact.CURRENT_SCORE per player when
+// the API exposes it (auto-detected signature), otherwise the exact eco
+// count (villagers + fishing ships + trade units) — no approximation.
 function updateStrip() {
   let i = statsI;
   while (i + 1 < statRows.length && statRows[i + 1].t <= t) i++;
   if (i === statsI) return;
   statsI = i;
   if (i < 0) return;
+  while (scoresI + 1 < scoreRows.length && scoreRows[scoresI + 1].t <= t)
+    scoresI++;
+  curScores = scoresI >= 0 ? scoreRows[scoresI].scores : null;
   const stats = statRows[i].stats;
   for (const chip of chips) {
     const row = Array.isArray(stats) ? stats[chip.pid] : null;
+    const sc = curScores ? curScores[chip.pid] : undefined;
     const eco = curEco[chip.pid];
-    chip.scoreEl.textContent = eco === undefined ? "" : eco;
+    const val = (sc !== undefined && sc !== null) ? sc
+      : (eco === undefined ? null : eco);
+    chip.scoreEl.textContent = val === null ? "" : val;
     chip.popEl.textContent = row && Number.isFinite(row[5]) ? row[5] : "";
     chip.ageEl.textContent =
       row && row[0] >= 0 && row[0] <= 3 ? AGE_ROMAN[row[0]] : "";
-    chip.score = eco === undefined ? null : eco;
+    chip.score = val;
   }
   // re-order rows: teams by total score desc, players by score desc
   const teams = {};
@@ -447,6 +454,8 @@ async function load() {
       snaps.push({ t: r.time, b: r.b, v: r.v, m: r.m, eco });
     }
     else if (r.type === "stats") statRows.push({ t: r.time, stats: r.stats });
+    else if (r.type === "scores")
+      scoreRows.push({ t: r.time, scores: r.scores || {} });
   }
   meta = lastMeta;
   if (!meta || !snaps.length)
@@ -455,6 +464,8 @@ async function load() {
   document.getElementById("mapname").textContent =
     (meta.mapName ? meta.mapName + " \u2014 " : "") + tag;
   buildStrip();
+  document.getElementById("scorelabel").textContent =
+    scoreRows.length ? "score" : "eco count";
   const end = snaps[snaps.length - 1].t;
   seekEl.max = end;
   const t0 = parseFloat(new URLSearchParams(location.search).get("t"));
