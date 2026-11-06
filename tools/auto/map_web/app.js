@@ -88,6 +88,9 @@ let curEco = {};          // eco count (villagers + fishers + traders)
 let scoresI = -1, curScores = null;   // real score rows, aligned to t
 let hasRealScore = false; // score rows exist (else eco count is shown)
 let dataHasHp = false;    // snapshot building rows carry hp (new data)
+let prevHp = null;        // id -> hp last snapshot (unfinished = rising)
+let hpRising = null;      // ids whose hp rose since the last snapshot
+let lastHpT = -1e9;       // game time of the prevHp snapshot
 let statsI = -1;
 
 function fmtTime(s) {
@@ -105,22 +108,6 @@ function colorOf(pid) {
 
 const civAbbr = (c) =>
   (c || "").replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase();
-
-/* Unfinished buildings: hp below the type's max (or a foundation row
- * without hp). maxHp lookup strips age/upgrade suffixes from the type
- * name; BUILDING_HP comes from aoe2techtree (genie ids via the
- * aoc-reference-data names). */
-const AGE_SUFFIX =
-  /_(DARK_AGE|FEUDAL_AGE|CASTLE_AGE|IMPERIAL_AGE|UPGRADED|BASE)$/;
-function maxHpFor(typeName) {
-  let n = (meta.typeNames[typeName] || "").toUpperCase();
-  for (;;) {
-    const m = n.match(AGE_SUFFIX);
-    if (!m) break;
-    n = n.slice(0, n.length - m[0].length);
-  }
-  return BUILDING_HP[n] || null;
-}
 
 function idIndex(snap, layer) {
   const m = new Map();
@@ -201,6 +188,22 @@ function draw() {
     bNotable = bDed.filter((r) => notableKindFor(r[2]));
     bPlain = bDed.filter((r) => !notableKindFor(r[2]));
     curEco = s0.eco || {};
+    // unfinished buildings: their hp is RISING (construction); damage
+    // lowers hp, completed buildings hold steady — no max-hp table
+    // needed (upgrades shift real maxima)
+    if (dataHasHp) {
+      const cont = t - lastHpT <= 5 && prevHp;
+      hpRising = new Set();
+      const next = cont ? new Map(prevHp) : new Map();
+      for (const r of s0.b || []) {
+        if (r.length < 6 || typeof r[5] !== "number") continue;
+        const old = cont ? prevHp.get(r[0]) : undefined;
+        if (old !== undefined && r[5] > old + 0.5) hpRising.add(r[0]);
+        next.set(r[0], r[5]);
+      }
+      prevHp = next;
+      lastHpT = t;
+    }
     idxI = i;
   }
 
@@ -231,10 +234,11 @@ function draw() {
                    : tag5 === "i" ? SIZES.inf : 1;
         size *= mult * SIZES.dot;
         if (tag5 === "c" || tag5 === "i" || tag5 === "s") {
-          // silhouette marker; its box may exceed the dot footprint
+          // silhouette marker; ships get a much larger box (they read
+          // poorly at dot size), the box may exceed the dot footprint
           ctx.save();
           ctx.translate(x, y);
-          const box = size * 2.2;
+          const box = size * (tag5 === "s" ? 4.6 : 2.2);
           ctx.scale(box / 24, box / 24);
           ctx.translate(-12, -12);
           ctx.lineWidth = 2; ctx.lineJoin = "round";
@@ -253,7 +257,8 @@ function draw() {
         ctx.stroke();
         continue;
       }
-      drawBuilding(kind, x, y, size, color, row[6], row[2]);
+      drawBuilding(kind, x, y, size, color,
+        hpRising && hpRising.has(row[0]));
     }
   };
   layer(bPlain, idxA.b, idxB.b, "bld", false);
@@ -268,21 +273,11 @@ function draw() {
 /* Buildings: dispatch to the selected icon set. Glyph/emoji draw a player-
  * colored square with the glyph on top; vector replaces the square with a
  * painted silhouette. Any kind a set does not cover falls back to the
- * glyph square. Buildings under construction (hp < max, or a foundation
- * row) render translucent. */
-function drawBuilding(kind, x, y, size, color, hp, typeId) {
+ * glyph square. Buildings under construction (hp rising between
+ * snapshots) render translucent. */
+function drawBuilding(kind, x, y, size, color, rising) {
   const r = size / 2;
-  let alpha = 1;
-  if (dataHasHp) {
-    const tname = meta.typeNames[typeId] || "";
-    if (hp === undefined || hp === null || /_FOUNDATION/.test(tname)) {
-      alpha = 0.45;
-    } else {
-      const max = maxHpFor(typeId);
-      if (max && hp < max * 0.98) alpha = 0.45;
-    }
-  }
-  if (alpha < 1) ctx.globalAlpha = alpha;
+  if (rising) ctx.globalAlpha = 0.45;
   ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
   ctx.fillStyle = color;
   const vec = kind && ICON_SETS.vector[kind];
@@ -307,7 +302,7 @@ function drawBuilding(kind, x, y, size, color, hp, typeId) {
       ctx.strokeText(glyph, x, y + size * 0.04);
     }
   }
-  if (alpha < 1) ctx.globalAlpha = 1;
+  if (rising) ctx.globalAlpha = 1;
 }
 
 // resigned heuristic: a player's score freezes the moment they leave —

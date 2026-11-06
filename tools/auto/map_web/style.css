@@ -6,7 +6,7 @@ body {
   display: flex; min-height: 100vh;
 }
 #left {
-  width: 272px; flex: 0 0 272px; padding: 10px 12px;
+  width: 340px; flex: 0 0 340px; padding: 10px 14px;
   border-right: 1px solid #2c352c;
   display: flex; flex-direction: column; gap: 10px;
 }
