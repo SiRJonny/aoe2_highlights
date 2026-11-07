@@ -80,6 +80,10 @@ def main():
     # skipped inside the collector by type).
     drive.send(handle, {"action": "map_mode", "on": True})
 
+    # reveal the whole map: object lists are vision-filtered by the
+    # assigned player, so unexplored water hides the fish otherwise
+    capture.fog_off()
+
     tag_dir = paths.tag_dir(args.tag)
     pos_path = tag_dir / "positions.jsonl"
     last_t = capture.collect_positions(handle, pos_path, args.max_minutes)
