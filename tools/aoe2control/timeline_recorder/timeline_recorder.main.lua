@@ -902,6 +902,8 @@ end
 -- nothing works -> the client falls back to its eco count
 local scoreSig = nil
 local chatSeen = 0
+local gaiaHistAcc = {}      -- gaia unit-type histogram (diagnosis)
+local gaiaHistSent = false
 local function scoreCall(pid)
     local factIdx = Fact.CURRENT_SCORE
     if scoreSig == "method" then
@@ -1250,25 +1252,39 @@ local function sample()
             end
         end
         -- fish live outside the UnitClass buckets in DE (the FISH class
-        -- queries return nothing) -> query by type instead, ids from
-        -- aoc-reference-data: shore/species fish vs great marlin
-        local gTypeGroups = {
-            fs = { 53, 69, 455, 456, 457, 458 },
-            f = { 450, 451 },
-        }
-        for gtag, tids in pairs(gTypeGroups) do
-            for _, ot in ipairs(tids) do
-                pcall(function()
-                    local gst = GetObjectStates(GetObjectsByType(ot))
-                    if gst and gst.id then
-                        for i = 1, #gst.id do
-                            table.insert(m, { gst.id[i], 0, gst.unitType[i],
-                                              round1(gst.x[i]),
-                                              round1(gst.y[i]), gtag })
+        -- queries return nothing) -> sweep ALL_UNITS for gaia objects
+        -- and tag fish by type (ids from aoc-reference-data: shore/
+        -- species fish vs great marlin). Unknown gaia types accumulate
+        -- into a histogram that ships once (api3_gaia) for diagnosis.
+        local gseen = {}
+        local fishTypes = { [53] = "fs", [69] = "fs", [455] = "fs",
+                            [456] = "fs", [457] = "fs", [458] = "fs",
+                            [450] = "f", [451] = "f" }
+        pcall(function()
+            local gst = GetObjectStates(
+                GetObjectsByClass(UnitClass.ALL_UNITS))
+            if gst and gst.id then
+                for i = 1, #gst.id do
+                    local pid = gst.playerId[i]
+                    local id = gst.id[i]
+                    if (pid == 0 or pid == -1) and not gseen[id] then
+                        local ut = gst.unitType[i]
+                        local tag = fishTypes[ut]
+                        if tag then
+                            gseen[id] = true
+                            table.insert(m, { id, 0, ut, round1(gst.x[i]),
+                                              round1(gst.y[i]), tag })
+                        elseif gaiaHistAcc then
+                            gaiaHistAcc[tostring(ut)] =
+                                (gaiaHistAcc[tostring(ut)] or 0) + 1
                         end
                     end
-                end)
+                end
             end
+        end)
+        if not gaiaHistSent and GetGameTime() > 40 then
+            gaiaHistSent = true
+            send("api3_gaia", { hist = gaiaHistAcc })
         end
         send("objects", { b = b, v = v, m = m })
     end
