@@ -23,16 +23,44 @@ DEBUG_DIR = ROOT / "out" / "auto_debug"
 WINDOW_TITLE = "Age of Empires II: Definitive Edition"
 
 
-def _mon():
+def _box():
+    # whole virtual desktop: the game may live on any monitor
     with mss.mss() as sct:
-        return sct.monitors[1]
+        return sct.monitors[0]
+
+
+_last_box = {"left": 0, "top": 0}
 
 
 def dump_screen() -> np.ndarray:
-    m = _mon()
+    global _last_box
+    box = _box()
     with mss.mss() as sct:
-        img = np.array(sct.grab(m))
+        img = np.array(sct.grab(box))
+    _last_box = box
     return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+
+
+def screen_offset():
+    """Global origin of the last dump_screen grab."""
+    return _last_box["left"], _last_box["top"]
+
+
+def crop_screen(x0, y0, x1, y1):
+    """Crop a region given in global screen coordinates."""
+    img = dump_screen()
+    ox, oy = _last_box["left"], _last_box["top"]
+    return img[y0 - oy:y1 - oy, x0 - ox:x1 - ox]
+
+
+def window_rect():
+    """Game window position on the desktop {left, top, right, bottom}."""
+    import win32gui
+    handle = win32gui.FindWindow(None, WINDOW_TITLE)
+    if not handle:
+        raise RuntimeError(f"game window not found ({WINDOW_TITLE!r})")
+    l, t, r, b = win32gui.GetWindowRect(handle)
+    return {"left": l, "top": t, "right": r, "bottom": b}
 
 
 def save_debug(name="debug"):
@@ -63,11 +91,11 @@ def locate_anchor(anchor: str, threshold=0.86):
     if hit is None:
         return None
     x, y, conf = hit
-    m = _mon()
-    # anchor mid-point
+    ox, oy = _last_box["left"], _last_box["top"]
+    # anchor mid-point, converted to global screen coordinates
     template = cv2.imread(str(ANCHORS / f"{anchor}.png"))
-    cx = x + template.shape[1] // 2 + m["left"]
-    cy = y + template.shape[0] // 2 + m["top"]
+    cx = x + template.shape[1] // 2 + ox
+    cy = y + template.shape[0] // 2 + oy
     return cx, cy, conf, hit
 
 
@@ -105,8 +133,17 @@ def wait_anchor(anchor: str, timeout=30, threshold=0.86, poll=0.6) -> bool:
 def focus_window():
     import win32con
     import win32gui
+    import ctypes
     handle = win32gui.FindWindow(None, WINDOW_TITLE)
-    if handle and win32gui.GetForegroundWindow() != handle:
+    if not handle:
+        raise RuntimeError(f"game window not found ({WINDOW_TITLE!r})")
+
+    def have_focus():
+        return win32gui.GetForegroundWindow() == handle
+
+    for attempt in range(4):
+        if have_focus():
+            return handle
         try:
             if win32gui.IsIconic(handle):
                 win32gui.ShowWindow(handle, win32con.SW_MAXIMIZE)
@@ -115,15 +152,34 @@ def focus_window():
         try:
             win32gui.SetForegroundWindow(handle)
         except Exception:
-            # Windows refuses foreground changes from background processes;
-            # an ALT press+release unlocks SetForegroundWindow for our thread.
+            pass
+        if have_focus():
+            return handle
+        try:
+            # an ALT press+release unlocks SetForegroundWindow for our
+            # thread; SwitchToThisWindow is the heavier fallback
             pyautogui.keyDown("alt")
             pyautogui.keyUp("alt")
+            win32gui.SetForegroundWindow(handle)
+        except Exception:
+            pass
+        if have_focus():
+            return handle
+        try:
+            ctypes.windll.user32.SwitchToThisWindow(handle, True)
+        except Exception:
+            pass
+        time.sleep(0.3)
+        if have_focus():
+            return handle
+        fg = win32gui.GetForegroundWindow()
+        if fg and fg != handle:
             try:
-                win32gui.SetForegroundWindow(handle)
+                win32gui.ShowWindow(fg, win32con.SW_MINIMIZE)
             except Exception:
                 pass
-            time.sleep(0.2)
+    if not have_focus():
+        raise RuntimeError("could not bring the game window to front")
     return handle
 
 

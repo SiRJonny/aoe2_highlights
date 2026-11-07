@@ -252,11 +252,13 @@ def fog_off():
 
     Fog is ON at every replay load. Detector: the minimap area goes dark
     under fog (calibrated: 73% dark pixels with fog vs 27% without).
-    Clicks the 'All Visible' checkbox only when needed."""
+    Clicks the 'All Visible' checkbox only when needed. The measured
+    panel offsets are game-window-relative, so the window may sit on
+    any monitor."""
     import cv2
-    m = game._mon()
-    mm = game.dump_screen()[900 - m["top"]:1060 - m["top"],
-                            1630 - m["left"]:1910 - m["left"]]
+    wr = game.window_rect()
+    mm = game.crop_screen(wr["left"] + 1630, wr["top"] + 900,
+                          wr["left"] + 1910, wr["top"] + 1060)
     dark = (mm.mean(axis=2) < 60).mean() * 100
     if dark < 50:
         log(f"fog already off (minimap dark {dark:.0f}%)")
