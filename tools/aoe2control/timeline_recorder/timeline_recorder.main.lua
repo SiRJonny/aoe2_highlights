@@ -244,6 +244,7 @@ local function sendMeta()
     end
     mapW = GetMapWidth() or 0
     mapH = GetMapHeight() or 0
+    mapTicks = 0
     IPC.Send({
         type = "meta",
         mapWidth = mapW,
@@ -914,6 +915,7 @@ local scoreSig = nil
 local api8Done = false      -- one-time corner probe via raw objects
 local api9Sent = false      -- one-time numeric type-id sweep
 local mapW, mapH = 0, 0     -- map size, captured when the meta is sent
+local mapTicks = 0          -- snapshots since the match started
 local gaiaHistAcc = {}      -- one-shot census of the area-sweep population
 local gaiaHistSent = false
 local fishCache = nil       -- fish rows from the last area sweep
@@ -1355,8 +1357,13 @@ local function sample()
             end)
         end
         -- api9: numeric sweep of ALL unit type ids (the enum only names
-        -- 588 of them — a fish type id may be missing from the enum)
-        if GetGameTime() > 40 and not api9Sent then
+        -- 588 of them — a fish type id may be missing from the enum).
+        -- Gated on the snapshot count, NOT game time: GetGameTime() is
+        -- leftover from the previous replay while the menu is up.
+        if mapW > 0 then
+            mapTicks = mapTicks + 1
+        end
+        if mapTicks == 45 and not api9Sent then
             api9Sent = true
             pcall(function()
                 local counts, firstPos = {}, {}
