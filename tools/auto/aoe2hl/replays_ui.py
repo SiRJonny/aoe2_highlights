@@ -65,6 +65,19 @@ def switch_to_replay_tab():
     step("searchbar", game.wait_anchor, "replays_searchbar", timeout=15)
 
 
+def close_control_menu():
+    """The CONTROL overlay blocks game UI clicks; close it (Menu Toggle
+    Key is Shift) when it is open. True when the menu is not open."""
+    for _ in range(2):
+        if game.locate_anchor("control_menu_open", threshold=0.85) is None:
+            return True
+        print("control menu open -> toggle (shift)")
+        game.focus_window()
+        game.pyautogui.press("shift")
+        time.sleep(1.2)
+    return game.locate_anchor("control_menu_open", threshold=0.85) is None
+
+
 def searchbar_pos():
     """Searchbar coords: template match when possible, window-relative
     fallback otherwise (a focused searchbar's glow breaks the anchor
@@ -125,8 +138,10 @@ def load(row):
     # the button click sometimes starts loading late (loading screen
     # anchor arrives >4 s later); wait long enough between styles and
     # keep one retry cycle before giving up. Re-select the row each
-    # attempt: a missed selection click leaves LOAD inert.
+    # attempt: a missed selection click leaves LOAD inert. The CONTROL
+    # overlay blocks game clicks, so close it first.
     for attempt in range(2):
+        close_control_menu()
         hit = game.locate_anchor("load_replay_button")
         if not hit:
             game.save_debug("fail_load_replay_button_gone")
@@ -251,6 +266,7 @@ def _run(row, search):
 
     if search:
         print(f"search '{search}'")
+        close_control_menu()
         prime_search(search)
     else:
         clear_search()
