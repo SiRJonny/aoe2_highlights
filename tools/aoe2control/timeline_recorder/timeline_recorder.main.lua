@@ -1446,29 +1446,35 @@ local function sample()
             end
         end
         send("objects", { b = b, v = v, m = m })
-        -- api10: sweep around the CAMERA - area queries may only see
-        -- loaded objects, and the fish the user saw were in view at
-        -- game start
-        if GetGameTime() > 30 and not api10Done then
+        -- api10: census around the camera AT GAME START (the fish the
+        -- user saw were in view then); unknown-type objects report
+        -- their positions for a water cross-check
+        if mapTicks <= 3 and not api10Done then
             api10Done = true
             pcall(function()
                 local cam = GetCameraPosition()
                 local gst = GetObjectStates(GetObjectsInArea(
                     Vector2(cam.x - 40, cam.y - 40),
                     Vector2(cam.x + 40, cam.y + 40)))
-                local hist = {}
+                local hist, unk = {}, {}
                 if gst and gst.id then
                     for i = 1, #gst.id do
-                        local key = tostring(gst.playerId[i]) .. ":"
-                            .. tostring(gst.unitType[i])
+                        local ut = tostring(gst.unitType[i])
+                        local key = tostring(gst.playerId[i]) .. ":" .. ut
                         hist[key] = (hist[key] or 0) + 1
+                        if not typeNames[ut] then
+                            unk[ut] = (unk[ut] or {})
+                            table.insert(unk[ut],
+                                tostring(math.floor(gst.x[i])) .. "," ..
+                                tostring(math.floor(gst.y[i])))
+                        end
                     end
                 end
                 send("api10_cam", {
                     cam = tostring(math.floor(cam.x)) .. ","
                         .. tostring(math.floor(cam.y)),
                     n = (gst and gst.id) and #gst.id or "nil",
-                    hist = hist })
+                    hist = hist, unk = unk })
             end)
         end
     end
