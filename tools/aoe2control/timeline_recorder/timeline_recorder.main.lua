@@ -913,6 +913,7 @@ end
 -- nothing works -> the client falls back to its eco count
 local scoreSig = nil
 local api8Done = false      -- one-time corner probe via raw objects
+local api10Done = false     -- one-time camera-area sweep
 local api9Sent = false      -- one-time numeric type-id sweep
 local mapW, mapH = 0, 0     -- map size, captured when the meta is sent
 local mapTicks = 0          -- snapshots since the match started
@@ -1406,6 +1407,31 @@ local function sample()
             end)
         end
         send("objects", { b = b, v = v, m = m })
+        -- api10: sweep around the CAMERA - area queries may only see
+        -- loaded objects, and the fish the user saw were in view at
+        -- game start
+        if GetGameTime() > 30 and not api10Done then
+            api10Done = true
+            pcall(function()
+                local cam = GetCameraPosition()
+                local gst = GetObjectStates(GetObjectsInArea(
+                    Vector2(cam.x - 40, cam.y - 40),
+                    Vector2(cam.x + 40, cam.y + 40)))
+                local hist = {}
+                if gst and gst.id then
+                    for i = 1, #gst.id do
+                        local key = tostring(gst.playerId[i]) .. ":"
+                            .. tostring(gst.unitType[i])
+                        hist[key] = (hist[key] or 0) + 1
+                    end
+                end
+                send("api10_cam", {
+                    cam = tostring(math.floor(cam.x)) .. ","
+                        .. tostring(math.floor(cam.y)),
+                    n = (gst and gst.id) and #gst.id or "nil",
+                    hist = hist })
+            end)
+        end
     end
     if not snapSent then
         snapSent = true

@@ -81,7 +81,8 @@ def collect_positions(handle, positions_path, max_minutes):
                                "api4_ot", "api4_area", "api4_fishtypes",
                                "api5_area", "api5_keys", "api5_rawkeys",
                                "api6_hist", "api7_shiparea", "api8_corner",
-                               "api8_hist", "api9_types", "api9_classes")
+                               "api8_hist", "api9_types", "api9_classes",
+                               "api10_cam")
                         and not rt.startswith("api2")):
                     continue
                 t = r.get("time")
