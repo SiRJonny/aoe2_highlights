@@ -1311,6 +1311,32 @@ local function sample()
                 table.insert(m, fr)
             end
         end
+        -- api8: probe the top-right corner (the fish the user saw at
+        -- game start) via the RAW object methods
+        if GetGameTime() > 40 and not api8Done then
+            api8Done = true
+            pcall(function()
+                local col = GetObjectsInArea(Vector2(180, 0),
+                                             Vector2(231, 40))
+                local out, n = {}, 0
+                for obj in pairs(col) do
+                    n = n + 1
+                    if n <= 40 then
+                        local d = {}
+                        pcall(function() d.id = obj:GetId() end)
+                        pcall(function() d.ut = obj:GetUnitObjectType() end)
+                        pcall(function() d.cls = obj:GetClass() end)
+                        pcall(function()
+                            local p = obj:GetPosition()
+                            d.p = tostring(math.floor(p.x)) .. ","
+                                .. tostring(math.floor(p.y))
+                        end)
+                        table.insert(out, d)
+                    end
+                end
+                send("api8_corner", { count = n, objects = out })
+            end)
+        end
         send("objects", { b = b, v = v, m = m })
     end
     if not snapSent then
