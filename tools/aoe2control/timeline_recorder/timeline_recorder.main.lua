@@ -1291,6 +1291,12 @@ local function sample()
                         if gst and gst.id then
                             for i = 1, #gst.id do
                                 local ut = gst.unitType[i]
+                                if not gaiaHistSent then
+                                    local key = tostring(gst.playerId[i])
+                                        .. ":" .. tostring(ut)
+                                    gaiaHistAcc[key] =
+                                        (gaiaHistAcc[key] or 0) + 1
+                                end
                                 local tag = fishTypes[ut]
                                 if tag then
                                     table.insert(rows, { gst.id[i], 0,
@@ -1316,6 +1322,10 @@ local function sample()
             for _, fr in ipairs(fishCache) do
                 table.insert(m, fr)
             end
+        end
+        if not gaiaHistSent and GetGameTime() > 60 then
+            gaiaHistSent = true
+            send("api6_hist", { hist = gaiaHistAcc })
         end
         -- api8: probe the top-right corner (the fish the user saw at
         -- game start) via the RAW object methods
