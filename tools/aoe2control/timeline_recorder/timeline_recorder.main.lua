@@ -295,6 +295,7 @@ function Init()
     gaiaHistSent = false
     gaiaHistAcc = {}
     api4Sent = false
+    api5Done = false
     chatSeen = 0    militaryClasses = findMilitaryClasses()
     if #militaryClasses > 0 then
         Log("timeline_recorder: pipe " .. PIPE .. " started, "
@@ -910,6 +911,7 @@ local chatSeen = 0
 local gaiaHistAcc = {}      -- gaia unit-type histogram (diagnosis)
 local gaiaHistSent = false
 local api4Sent = false      -- one-time object census probe
+local api5Done = false      -- one-time GetObjectsInArea signature hunt
 local function scoreCall(pid)
     local factIdx = Fact.CURRENT_SCORE
     if scoreSig == "method" then
@@ -1358,6 +1360,46 @@ local function sample()
                 send("api4_fishtypes", {
                     count = (ok and st and st.id) and #st.id or tostring(st) })
             end)
+        end
+        -- api5: GetObjectsInArea signature hunt, one attempt per send
+        if GetGameTime() > 50 and not api5Done then
+            api5Done = true
+            local variants = {
+                { "v_v2_10", function()
+                    return GetObjectsInArea(Vector2(0, 0), Vector2(10, 10))
+                end },
+                { "v_4int_10", function()
+                    return GetObjectsInArea(0, 0, 10, 10)
+                end },
+                { "v_f4_10", function()
+                    return GetObjectsInArea(0.0, 0.0, 10.0, 10.0)
+                end },
+                { "v_rad_100", function()
+                    return GetObjectsInArea(100, 100, 20)
+                end },
+                { "v_v2_full", function()
+                    local w, h = GetMapWidth(), GetMapHeight()
+                    return GetObjectsInArea(Vector2(0, 0), Vector2(w, h))
+                end },
+                { "v_4int_full", function()
+                    local w, h = GetMapWidth(), GetMapHeight()
+                    return GetObjectsInArea(0, 0, w, h)
+                end },
+            }
+            for _, v in ipairs(variants) do
+                pcall(function()
+                    local ok, st = pcall(v[2])
+                    local n = "?"
+                    if ok and st and st.id then
+                        n = tostring(#st.id)
+                    elseif ok then
+                        n = "no-states"
+                    else
+                        n = "ERR " .. tostring(st)
+                    end
+                    send("api5_area", { name = v[1], n = n })
+                end)
+            end
         end
         send("objects", { b = b, v = v, m = m })
     end

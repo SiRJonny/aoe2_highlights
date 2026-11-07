@@ -78,7 +78,8 @@ def collect_positions(handle, positions_path, max_minutes):
                 rt = r.get("type")
                 if (rt not in ("meta", "objects", "tc_snap", "stats", "api",
                                "scores", "chat", "bld_event", "api3_gaia",
-                               "api4_ot", "api4_area", "api4_fishtypes")
+                               "api4_ot", "api4_area", "api4_fishtypes",
+                               "api5_area")
                         and not rt.startswith("api2")):
                     continue
                 t = r.get("time")
