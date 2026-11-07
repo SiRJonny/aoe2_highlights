@@ -295,6 +295,9 @@ function Init()
     IPC.StartServer(PIPE)
     buildHouseTypeSet()
     buildAnimalTypeSet()
+    -- file-locals persist across menu phases; re-arm the one-shot census
+    gaiaHistAcc = {}
+    gaiaHistSent = false
     militaryClasses = findMilitaryClasses()
     if #militaryClasses > 0 then
         Log("timeline_recorder: pipe " .. PIPE .. " started, "
@@ -907,6 +910,8 @@ end
 -- nothing works -> the client falls back to its eco count
 local scoreSig = nil
 local mapW, mapH = 0, 0     -- map size, captured when the meta is sent
+local gaiaHistAcc = {}      -- one-shot census of the area-sweep population
+local gaiaHistSent = false
 local function scoreCall(pid)
     local factIdx = Fact.CURRENT_SCORE
     if scoreSig == "method" then
@@ -1275,18 +1280,28 @@ local function sample()
                                     math.min(gy + step, mapH))))
                         if gst and gst.id then
                             for i = 1, #gst.id do
-                                local tag = fishTypes[gst.unitType[i]]
+                                local ut = gst.unitType[i]
+                                local tag = fishTypes[ut]
                                 if tag then
                                     table.insert(m, { gst.id[i], 0,
-                                        gst.unitType[i],
-                                        round1(gst.x[i]),
+                                        ut, round1(gst.x[i]),
                                         round1(gst.y[i]), tag })
+                                end
+                                if not gaiaHistSent then
+                                    local key = tostring(gst.playerId[i])
+                                        .. ":" .. tostring(ut)
+                                    gaiaHistAcc[key] =
+                                        (gaiaHistAcc[key] or 0) + 1
                                 end
                             end
                         end
                     end)
                 end
             end
+        end
+        if not gaiaHistSent and GetGameTime() > 60 then
+            gaiaHistSent = true
+            send("api6_hist", { hist = gaiaHistAcc })
         end
         send("objects", { b = b, v = v, m = m })
     end
