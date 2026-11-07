@@ -28,6 +28,39 @@ def control_running() -> bool:
     return out.stdout.strip() == "yes"
 
 
+def unload_key():
+    """The CONTROL module's unload hotkey from settings.timeline.ini
+    (VK code) mapped to a pyautogui key name. Delete was the original
+    key — on the replay list it hits the delete-replay confirmation,
+    so the default is now Insert."""
+    vk_names = {46: "delete", 45: "insert", 36: "home", 35: "end",
+                33: "pageup", 34: "pagedown", 19: "pause",
+                123: "f12", 144: "numlock", 27: "esc"}
+    ini = HERE.parent / "aoe2control" / "settings.timeline.ini"
+    vk = 45
+    try:
+        for line in ini.read_text(encoding="utf-8").splitlines():
+            if line.lower().startswith("unload key"):
+                vk = int(line.split("=")[1].strip())
+                break
+    except Exception:                        # noqa: BLE001
+        pass
+    return vk_names.get(vk, "insert")
+
+
+def unload_module(max_tries=3):
+    """Press the module's unload hotkey (focused) until the pipe is gone."""
+    key = unload_key()
+    for attempt in range(max_tries):
+        gameui.focus_window()
+        gameui.pyautogui.press(key)
+        time.sleep(3)
+        if not control_running():
+            return True
+        print(f"module still running after {key} (attempt {attempt})")
+    return not control_running()
+
+
 def inject() -> None:
     if control_running():
         print("CONTROL already running; skip injection")
