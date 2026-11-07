@@ -298,6 +298,8 @@ function Init()
     -- file-locals persist across menu phases; re-arm the one-shot census
     gaiaHistAcc = {}
     gaiaHistSent = false
+    fishCache = nil
+    fishLastSweep = -1e9
     militaryClasses = findMilitaryClasses()
     if #militaryClasses > 0 then
         Log("timeline_recorder: pipe " .. PIPE .. " started, "
@@ -912,6 +914,8 @@ local scoreSig = nil
 local mapW, mapH = 0, 0     -- map size, captured when the meta is sent
 local gaiaHistAcc = {}      -- one-shot census of the area-sweep population
 local gaiaHistSent = false
+local fishCache = nil       -- fish rows from the last area sweep
+local fishLastSweep = -1e9
 local function scoreCall(pid)
     local factIdx = Fact.CURRENT_SCORE
     if scoreSig == "method" then
@@ -1264,12 +1268,16 @@ local function sample()
         -- the meta was sent; GetMapWidth misbehaves later) and tag fish
         -- by type (ids from aoc-reference-data): f = great marlin
         -- (deep), fs = shore/species fish
-        if mapW > 0 then
+        if mapW > 0 and GetGameTime() - fishLastSweep > 60 then
+            fishLastSweep = GetGameTime()
             local fishTypes = { [53] = "fs", [69] = "fs", [455] = "fs",
                                 [456] = "fs", [457] = "fs", [458] = "fs",
                                 [450] = "f", [451] = "f" }
             -- full-map area queries silently return empty; tile the map
-            -- into a 4x4 grid of small area queries instead
+            -- into a 4x4 grid of small area queries instead. The FIRST
+            -- GetObjectsInArea call of a module load returns data and
+            -- later ones return empty, so sweep rarely and cache.
+            local rows = {}
             local step = math.ceil(mapW / 4)
             for gy = 0, mapH - 1, step do
                 for gx = 0, mapW - 1, step do
@@ -1283,7 +1291,7 @@ local function sample()
                                 local ut = gst.unitType[i]
                                 local tag = fishTypes[ut]
                                 if tag then
-                                    table.insert(m, { gst.id[i], 0,
+                                    table.insert(rows, { gst.id[i], 0,
                                         ut, round1(gst.x[i]),
                                         round1(gst.y[i]), tag })
                                 end
@@ -1298,10 +1306,14 @@ local function sample()
                     end)
                 end
             end
+            if #rows > 0 or not fishCache then
+                fishCache = rows          -- keep a good cache on an
+            end                           -- empty re-sweep
         end
-        if not gaiaHistSent and GetGameTime() > 60 then
-            gaiaHistSent = true
-            send("api6_hist", { hist = gaiaHistAcc })
+        if fishCache then
+            for _, fr in ipairs(fishCache) do
+                table.insert(m, fr)
+            end
         end
         send("objects", { b = b, v = v, m = m })
     end
