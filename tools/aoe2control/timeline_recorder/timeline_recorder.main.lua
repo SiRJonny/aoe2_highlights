@@ -1312,22 +1312,51 @@ local function sample()
                 send("api4_ot", { counts = ot })
             end)
             pcall(function()
-                local hist = {}
-                local w, h = GetMapWidth(), GetMapHeight()
-                local ok, st = pcall(function()
-                    return GetObjectStates(
-                        GetObjectsInArea(Vector2(0, 0), Vector2(w, h)))
-                end)
-                if ok and st and st.id then
-                    for i = 1, #st.id do
-                        local key = tostring(st.playerId[i]) .. ":"
-                            .. tostring(st.unitType[i])
-                        hist[key] = (hist[key] or 0) + 1
+                local hist, steps = {}, {}
+                local okw, w = pcall(GetMapWidth)
+                steps[#steps + 1] = "w=" .. tostring(w)
+                local okh, h = pcall(GetMapHeight)
+                steps[#steps + 1] = "h=" .. tostring(h)
+                if okw and okh then
+                    local ok1, st1 = pcall(function()
+                        return GetObjectStates(
+                            GetObjectsInArea(Vector2(0, 0),
+                                             Vector2(w, h)))
+                    end)
+                    steps[#steps + 1] = "v2=" .. tostring(ok1)
+                    if ok1 and st1 and st1.id then
+                        for i = 1, #st1.id do
+                            local key = tostring(st1.playerId[i]) .. ":"
+                                .. tostring(st1.unitType[i])
+                            hist[key] = (hist[key] or 0) + 1
+                        end
+                    else
+                        hist["ERR_V2"] = tostring(st1)
                     end
-                else
-                    hist["ERROR"] = tostring(st)
+                    local ok2, st2 = pcall(function()
+                        return GetObjectStates(
+                            GetObjectsInArea(0.0, 0.0, w + 0.0, h + 0.0))
+                    end)
+                    steps[#steps + 1] = "f4=" .. tostring(ok2)
+                    if ok2 and st2 and st2.id then
+                        for i = 1, #st2.id do
+                            local key = "f:" .. tostring(st2.playerId[i])
+                                .. ":" .. tostring(st2.unitType[i])
+                            hist[key] = (hist[key] or 0) + 1
+                        end
+                    else
+                        hist["ERR_F4"] = tostring(st2)
+                    end
                 end
-                send("api4_area", { hist = hist })
+                send("api4_area", { hist = hist, steps = steps })
+            end)
+            pcall(function()
+                local ok, st = pcall(function()
+                    return GetObjectStates(GetObjectsByTypes(
+                        { 53, 69, 450, 451, 455, 456, 457, 458 }))
+                end)
+                send("api4_fishtypes", {
+                    count = (ok and st and st.id) and #st.id or tostring(st) })
             end)
         end
         send("objects", { b = b, v = v, m = m })
