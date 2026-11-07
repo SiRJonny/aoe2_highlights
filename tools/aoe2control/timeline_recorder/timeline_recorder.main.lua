@@ -242,10 +242,12 @@ local function sendMeta()
             table.insert(players, { id = i, name = name })
         end
     end
+    mapW = GetMapWidth() or 0
+    mapH = GetMapHeight() or 0
     IPC.Send({
         type = "meta",
-        mapWidth = GetMapWidth(),
-        mapHeight = GetMapHeight(),
+        mapWidth = mapW,
+        mapHeight = mapH,
         players = players,
         sampleInterval = SAMPLE_INTERVAL,
         houseTypes = houseTypes,
@@ -290,13 +292,11 @@ function Init()
     IPC.StartServer(PIPE)
     buildHouseTypeSet()
     buildAnimalTypeSet()
-    -- per-game-load state: file-locals persist across menu phases, so
-    -- one-shot probes must re-arm here or the first load eats them
-    gaiaHistSent = false
+    -- file-locals persist across menu phases; the census must re-arm or
+    -- the first game load consumes it
     gaiaHistAcc = {}
-    api4Sent = false
-    api5Done = false
-    chatSeen = 0    militaryClasses = findMilitaryClasses()
+    gaiaHistSent = false
+    militaryClasses = findMilitaryClasses()
     if #militaryClasses > 0 then
         Log("timeline_recorder: pipe " .. PIPE .. " started, "
             .. countHouseTypes() .. " house types known, "
@@ -907,11 +907,9 @@ end
 -- "fp" = GetFact(fact, pid), "pf" = GetFact(pid, fact)); "none" when
 -- nothing works -> the client falls back to its eco count
 local scoreSig = nil
-local chatSeen = 0
-local gaiaHistAcc = {}      -- gaia unit-type histogram (diagnosis)
+local mapW, mapH = 0, 0     -- map size, captured when the meta is sent
+local gaiaHistAcc = {}      -- one-shot census of the area-sweep population
 local gaiaHistSent = false
-local api4Sent = false      -- one-time object census probe
-local api5Done = false      -- one-time GetObjectsInArea signature hunt
 local function scoreCall(pid)
     local factIdx = Fact.CURRENT_SCORE
     if scoreSig == "method" then
@@ -1259,179 +1257,39 @@ local function sample()
                 end
             end
         end
-        -- fish live outside the UnitClass buckets in DE (the FISH class
-        -- queries return nothing) -> sweep ALL_UNITS and tag fish by
-        -- type (ids from aoc-reference-data). Everything else lands in
-        -- a pid:type histogram that ships once (api3_gaia) — the first
-        -- run proved our gaia-player filter was wrong, so no filtering.
-        local gseen = {}
-        local fishTypes = { [53] = "fs", [69] = "fs", [455] = "fs",
-                            [456] = "fs", [457] = "fs", [458] = "fs",
-                            [450] = "f", [451] = "f" }
-        pcall(function()
-            local gst = GetObjectStates(
-                GetObjectsByClass(UnitClass.ALL_UNITS))
-            if not (gst and gst.id) then
-                gaiaHistAcc["NO_STATES"] = (gaiaHistAcc["NO_STATES"] or 0) + 1
-                return
-            end
-            for i = 1, #gst.id do
-                local id = gst.id[i]
-                local pid = gst.playerId[i]
-                local ut = gst.unitType[i]
-                local tag = fishTypes[ut]
-                if tag and not gseen[id] then
-                    gseen[id] = true
-                    table.insert(m, { id, 0, ut, round1(gst.x[i]),
-                                      round1(gst.y[i]), tag })
-                else
-                    local key = tostring(pid) .. ":" .. tostring(ut)
-                    gaiaHistAcc[key] = (gaiaHistAcc[key] or 0) + 1
+        -- fish: not in the UnitClass buckets nor in GetObjectsByType
+        -- (0 objects) — sweep the whole map area (size captured when
+        -- the meta was sent; GetMapWidth misbehaves later) and tag fish
+        -- by type (ids from aoc-reference-data): f = great marlin
+        -- (deep), fs = shore/species fish
+        if mapW > 0 then
+            local fishTypes = { [53] = "fs", [69] = "fs", [455] = "fs",
+                                [456] = "fs", [457] = "fs", [458] = "fs",
+                                [450] = "f", [451] = "f" }
+            pcall(function()
+                local gst = GetObjectStates(
+                    GetObjectsInArea(Vector2(0, 0), Vector2(mapW, mapH)))
+                if gst and gst.id then
+                    for i = 1, #gst.id do
+                        local ut = gst.unitType[i]
+                        local tag = fishTypes[ut]
+                        if tag then
+                            table.insert(m, { gst.id[i], 0, ut,
+                                              round1(gst.x[i]),
+                                              round1(gst.y[i]), tag })
+                        end
+                        if not gaiaHistSent then
+                            local key = tostring(gst.playerId[i]) .. ":"
+                                .. tostring(ut)
+                            gaiaHistAcc[key] = (gaiaHistAcc[key] or 0) + 1
+                        end
+                    end
                 end
-            end
-        end)
-        if not gaiaHistSent and GetGameTime() > 40 then
+            end)
+        end
+        if not gaiaHistSent and GetGameTime() > 60 then
             gaiaHistSent = true
-            send("api3_gaia", { hist = gaiaHistAcc })
-        end
-        -- api4: definitive object census. (a) every UnitObjectType
-        -- member -> object count via GetObjectsByType; (b) full-map
-        -- GetObjectsInArea sweep -> pid:type histogram of EVERYTHING.
-        -- Answers where gaia fish actually live.
-        if not api4Sent and GetGameTime() > 45 then
-            api4Sent = true
-            pcall(function()
-                local ot = {}
-                pcall(function()
-                    for name, val in pairs(UnitObjectType) do
-                        local ok, st = pcall(function()
-                            return GetObjectStates(GetObjectsByType(val))
-                        end)
-                        ot[name .. "=" .. tostring(val)] =
-                            (ok and st and st.id) and #st.id or -1
-                    end
-                end)
-                send("api4_ot", { counts = ot })
-            end)
-            pcall(function()
-                local hist, steps = {}, {}
-                local okw, w = pcall(GetMapWidth)
-                steps[#steps + 1] = "w=" .. tostring(w)
-                local okh, h = pcall(GetMapHeight)
-                steps[#steps + 1] = "h=" .. tostring(h)
-                if okw and okh then
-                    local ok1, st1 = pcall(function()
-                        return GetObjectStates(
-                            GetObjectsInArea(Vector2(0, 0),
-                                             Vector2(w, h)))
-                    end)
-                    steps[#steps + 1] = "v2=" .. tostring(ok1)
-                    if ok1 and st1 and st1.id then
-                        for i = 1, #st1.id do
-                            local key = tostring(st1.playerId[i]) .. ":"
-                                .. tostring(st1.unitType[i])
-                            hist[key] = (hist[key] or 0) + 1
-                        end
-                    else
-                        hist["ERR_V2"] = tostring(st1)
-                    end
-                    local ok2, st2 = pcall(function()
-                        return GetObjectStates(
-                            GetObjectsInArea(0.0, 0.0, w + 0.0, h + 0.0))
-                    end)
-                    steps[#steps + 1] = "f4=" .. tostring(ok2)
-                    if ok2 and st2 and st2.id then
-                        for i = 1, #st2.id do
-                            local key = "f:" .. tostring(st2.playerId[i])
-                                .. ":" .. tostring(st2.unitType[i])
-                            hist[key] = (hist[key] or 0) + 1
-                        end
-                    else
-                        hist["ERR_F4"] = tostring(st2)
-                    end
-                end
-                send("api4_area", { hist = hist, steps = steps })
-            end)
-            pcall(function()
-                local ok, st = pcall(function()
-                    return GetObjectStates(GetObjectsByTypes(
-                        { 53, 69, 450, 451, 455, 456, 457, 458 }))
-                end)
-                send("api4_fishtypes", {
-                    count = (ok and st and st.id) and #st.id or tostring(st) })
-            end)
-        end
-        -- api5: GetObjectsInArea signature hunt, one attempt per send
-        if GetGameTime() > 50 and not api5Done then
-            api5Done = true
-            local variants = {
-                { "v_v2_10", function()
-                    return GetObjectsInArea(Vector2(0, 0), Vector2(10, 10))
-                end },
-                { "v_4int_10", function()
-                    return GetObjectsInArea(0, 0, 10, 10)
-                end },
-                { "v_f4_10", function()
-                    return GetObjectsInArea(0.0, 0.0, 10.0, 10.0)
-                end },
-                { "v_rad_100", function()
-                    return GetObjectsInArea(100, 100, 20)
-                end },
-                { "v_v2_full", function()
-                    local w, h = GetMapWidth(), GetMapHeight()
-                    return GetObjectsInArea(Vector2(0, 0), Vector2(w, h))
-                end },
-                { "v_4int_full", function()
-                    local w, h = GetMapWidth(), GetMapHeight()
-                    return GetObjectsInArea(0, 0, w, h)
-                end },
-            }
-            for _, v in ipairs(variants) do
-                pcall(function()
-                    local ok, st = pcall(v[2])
-                    local n = "?"
-                    if ok and st and st.id then
-                        n = tostring(#st.id)
-                    elseif ok then
-                        n = "no-states"
-                    else
-                        n = "ERR " .. tostring(st)
-                    end
-                    send("api5_area", { name = v[1], n = n })
-                end)
-            end
-            -- what does GetObjectStates return for an area collection?
-            pcall(function()
-                local ok, st = pcall(function()
-                    return GetObjectStates(
-                        GetObjectsInArea(Vector2(0, 0), Vector2(231, 231)))
-                end)
-                local keys = {}
-                if ok and type(st) == "table" then
-                    for k, v in pairs(st) do
-                        keys[#keys + 1] = tostring(k) .. ":" .. type(v)
-                    end
-                else
-                    keys[#keys + 1] = "ERR " .. tostring(st)
-                end
-                send("api5_keys", { keys = keys })
-            end)
-            -- raw collection keys (before GetObjectStates)
-            pcall(function()
-                local ok, col = pcall(function()
-                    return GetObjectsInArea(Vector2(0, 0), Vector2(231, 231))
-                end)
-                local keys = {}
-                if ok and type(col) == "table" then
-                    for k, v in pairs(col) do
-                        keys[#keys + 1] = tostring(k) .. ":" .. type(v)
-                    end
-                    keys[#keys + 1] = "count=" .. tostring(#col)
-                else
-                    keys[#keys + 1] = "ERR " .. tostring(col)
-                end
-                send("api5_rawkeys", { keys = keys })
-            end)
+            send("api6_hist", { hist = gaiaHistAcc })
         end
         send("objects", { b = b, v = v, m = m })
     end
