@@ -1277,34 +1277,36 @@ local function sample()
             local fishTypes = { [53] = "fs", [69] = "fs", [455] = "fs",
                                 [456] = "fs", [457] = "fs", [458] = "fs",
                                 [450] = "f", [451] = "f" }
-            -- the area corners are in world sub-units (~32 per tile),
-            -- not tiles: a tile-sized rectangle returned only ~40
-            -- objects. Try increasing scales until one returns data.
+            -- small area queries + GetObjectStates, proven by the api8
+            -- corner census; 6x6 grid of 39x39-tile cells covers the map
             local rows = {}
-            for _, scale in ipairs({ 32, 100 }) do
-                pcall(function()
-                    local gst = GetObjectStates(GetObjectsInArea(
-                        Vector2(0, 0),
-                        Vector2(mapW * scale, mapH * scale)))
-                    if gst and gst.id then
-                        for i = 1, #gst.id do
-                            local ut = gst.unitType[i]
-                            local tag = fishTypes[ut]
-                            if tag then
-                                table.insert(rows, { gst.id[i], 0, ut,
-                                    round1(gst.x[i]), round1(gst.y[i]),
-                                    tag })
-                            end
-                            if scale == 32 and not gaiaHistSent then
-                                local key = tostring(gst.playerId[i])
-                                    .. ":" .. tostring(ut)
-                                gaiaHistAcc[key] =
-                                    (gaiaHistAcc[key] or 0) + 1
+            local step = math.ceil(mapW / 6)
+            for gy = 0, mapH - 1, step do
+                for gx = 0, mapW - 1, step do
+                    pcall(function()
+                        local gst = GetObjectStates(GetObjectsInArea(
+                            Vector2(gx, gy),
+                            Vector2(math.min(gx + step, mapW),
+                                    math.min(gy + step, mapH))))
+                        if gst and gst.id then
+                            for i = 1, #gst.id do
+                                local ut = gst.unitType[i]
+                                local tag = fishTypes[ut]
+                                if tag then
+                                    table.insert(rows, { gst.id[i], 0,
+                                        ut, round1(gst.x[i]),
+                                        round1(gst.y[i]), tag })
+                                end
+                                if not gaiaHistSent then
+                                    local key = tostring(gst.playerId[i])
+                                        .. ":" .. tostring(ut)
+                                    gaiaHistAcc[key] =
+                                        (gaiaHistAcc[key] or 0) + 1
+                                end
                             end
                         end
-                    end
-                end)
-                if #rows > 0 then break end
+                    end)
+                end
             end
             if #rows > 0 or not fishCache then
                 fishCache = rows          -- keep a good cache on an
