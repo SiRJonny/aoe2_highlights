@@ -121,15 +121,17 @@ def clear_search():
     time.sleep(0.5)
 
 
-def load():
+def load(row):
     # the button click sometimes starts loading late (loading screen
     # anchor arrives >4 s later); wait long enough between styles and
-    # keep one retry cycle before giving up
+    # keep one retry cycle before giving up. Re-select the row each
+    # attempt: a missed selection click leaves LOAD inert.
     for attempt in range(2):
         hit = game.locate_anchor("load_replay_button")
         if not hit:
             game.save_debug("fail_load_replay_button_gone")
             raise UIError("load_replay_button gone")
+        pick_row(row)
         game.focus_window()
         time.sleep(0.4)
         cx, cy = hit[0], hit[1]
@@ -140,7 +142,7 @@ def load():
                 if not game.hit_anchor("load_replay_header"):
                     return
             print(f"load style {style} had no effect (attempt {attempt})")
-    game.save_debug("fail_load_replay_no_effect")
+    game.save_debug("fail_load_no_effect")
     raise UIError("load click had no effect")
 
 
@@ -255,7 +257,7 @@ def _run(row, search):
 
     print("picking row", row)
     pick_row(row)
-    load()
+    load(row)
     return True
 
 
