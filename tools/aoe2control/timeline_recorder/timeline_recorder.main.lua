@@ -296,6 +296,12 @@ function Init()
     -- the first game load consumes it
     gaiaHistAcc = {}
     gaiaHistSent = false
+    -- file-locals persist across menu phases; re-arm one-shot probes
+    gaiaHistAcc = {}
+    gaiaHistSent = false
+    api4Sent = false
+    api5Done = false
+    api7Done = false
     militaryClasses = findMilitaryClasses()
     if #militaryClasses > 0 then
         Log("timeline_recorder: pipe " .. PIPE .. " started, "
@@ -1290,6 +1296,34 @@ local function sample()
                     end)
                 end
             end
+        end
+        -- api7: census a small area around the first fishing ships —
+        -- fish schools sit right next to fishing ships
+        if GetGameTime() > 60 and not api7Done then
+            api7Done = true
+            pcall(function()
+                local st = GetObjectStates(
+                    GetObjectsByClass(UnitClass.FISHING_SHIP))
+                if st and st.id and #st.id > 0 then
+                    for s = 1, math.min(2, #st.id) do
+                        local cx, cy = st.x[s], st.y[s]
+                        local gst = GetObjectStates(GetObjectsInArea(
+                            Vector2(cx - 12, cy - 12),
+                            Vector2(cx + 12, cy + 12)))
+                        if gst and gst.id then
+                            local hist = {}
+                            for i = 1, #gst.id do
+                                local key = tostring(gst.playerId[i])
+                                    .. ":" .. tostring(gst.unitType[i])
+                                hist[key] = (hist[key] or 0) + 1
+                            end
+                            send("api7_shiparea", {
+                                ship = s, x = round1(cx), y = round1(cy),
+                                type = st.unitType[s], hist = hist })
+                        end
+                    end
+                end
+            end)
         end
         send("objects", { b = b, v = v, m = m })
     end
