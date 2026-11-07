@@ -1335,6 +1335,21 @@ local function sample()
                     end
                 end
                 send("api8_corner", { count = n, objects = out })
+                -- states histogram over the same collection
+                local ok2, hst = pcall(function()
+                    return GetObjectStates(col)
+                end)
+                if ok2 and hst and hst.id then
+                    local hist = {}
+                    for i = 1, #hst.id do
+                        local key = tostring(hst.playerId[i]) .. ":"
+                            .. tostring(hst.unitType[i])
+                        hist[key] = (hist[key] or 0) + 1
+                    end
+                    send("api8_hist", { n = #hst.id, hist = hist })
+                else
+                    send("api8_hist", { n = "ERR " .. tostring(hst) })
+                end
             end)
         end
         send("objects", { b = b, v = v, m = m })
