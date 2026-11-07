@@ -46,10 +46,14 @@ def main():
     if args.force_inject:
         log = capture.log
         log("swapping CONTROL module ...")
-        gameui.focus_window()
-        gameui.pyautogui.keyDown("delete")
-        gameui.pyautogui.keyUp("delete")
-        time.sleep(4)
+        for attempt in range(3):
+            gameui.focus_window()
+            gameui.pyautogui.keyDown("delete")
+            gameui.pyautogui.keyUp("delete")
+            time.sleep(3)
+            if not control.control_running():
+                break
+            log(f"module still running after delete (attempt {attempt})")
         control.inject()
         time.sleep(4)
     if not control.control_running():
