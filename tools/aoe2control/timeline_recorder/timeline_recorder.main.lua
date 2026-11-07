@@ -1267,23 +1267,41 @@ local function sample()
                                 [456] = "fs", [457] = "fs", [458] = "fs",
                                 [450] = "f", [451] = "f" }
             pcall(function()
-                local gst = GetObjectStates(
-                    GetObjectsInArea(Vector2(0, 0), Vector2(mapW, mapH)))
-                if gst and gst.id then
-                    for i = 1, #gst.id do
-                        local ut = gst.unitType[i]
-                        local tag = fishTypes[ut]
-                        if tag then
-                            table.insert(m, { gst.id[i], 0, ut,
-                                              round1(gst.x[i]),
-                                              round1(gst.y[i]), tag })
-                        end
-                        if not gaiaHistSent then
-                            local key = tostring(gst.playerId[i]) .. ":"
-                                .. tostring(ut)
-                            gaiaHistAcc[key] = (gaiaHistAcc[key] or 0) + 1
-                        end
+                local col = GetObjectsInArea(Vector2(0, 0),
+                                             Vector2(mapW, mapH))
+                local n = 0
+                for obj in pairs(col) do
+                    n = n + 1
+                    local ut = nil
+                    pcall(function() ut = obj:GetObjectType() end)
+                    pcall(function() ut = obj.type end)
+                    local tag = fishTypes[ut]
+                    if tag then
+                        local x, y = 0, 0
+                        pcall(function() x = obj:GetPosition().x end)
+                        pcall(function() x = obj.x end)
+                        pcall(function() y = obj:GetPosition().y end)
+                        pcall(function() y = obj.y end)
+                        table.insert(m, { n, 0, ut or -1, round1(x),
+                                          round1(y), tag })
                     end
+                    if not gaiaHistSent then
+                        local keys = {}
+                        pcall(function()
+                            for k, v in pairs(obj) do
+                                keys[#keys + 1] = tostring(k)
+                            end
+                        end)
+                        pcall(function()
+                            keys[#keys + 1] = "type=" .. tostring(ut)
+                        end)
+                        local kk = "keys:" .. table.concat(keys, ",")
+                        gaiaHistAcc[kk] = (gaiaHistAcc[kk] or 0) + 1
+                    end
+                end
+                if not gaiaHistSent then
+                    local tk = "total:" .. tostring(n)
+                    gaiaHistAcc[tk] = (gaiaHistAcc[tk] or 0) + 1
                 end
             end)
         end
