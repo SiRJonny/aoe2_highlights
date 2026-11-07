@@ -1316,7 +1316,7 @@ local function sample()
                 local w, h = GetMapWidth(), GetMapHeight()
                 local ok, st = pcall(function()
                     return GetObjectStates(
-                        GetObjectsInArea(0, 0, w, h))
+                        GetObjectsInArea(Vector2(0, 0), Vector2(w, h)))
                 end)
                 if ok and st and st.id then
                     for i = 1, #st.id do
