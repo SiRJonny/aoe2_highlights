@@ -1266,48 +1266,30 @@ local function sample()
             local fishTypes = { [53] = "fs", [69] = "fs", [455] = "fs",
                                 [456] = "fs", [457] = "fs", [458] = "fs",
                                 [450] = "f", [451] = "f" }
-            pcall(function()
-                local col = GetObjectsInArea(Vector2(0, 0),
-                                             Vector2(mapW, mapH))
-                local n = 0
-                for obj in pairs(col) do
-                    n = n + 1
-                    local ut = nil
-                    pcall(function() ut = obj:GetObjectType() end)
-                    pcall(function() ut = obj.type end)
-                    local tag = fishTypes[ut]
-                    if tag then
-                        local x, y = 0, 0
-                        pcall(function() x = obj:GetPosition().x end)
-                        pcall(function() x = obj.x end)
-                        pcall(function() y = obj:GetPosition().y end)
-                        pcall(function() y = obj.y end)
-                        table.insert(m, { n, 0, ut or -1, round1(x),
-                                          round1(y), tag })
-                    end
-                    if not gaiaHistSent then
-                        local keys = {}
-                        pcall(function()
-                            for k, v in pairs(obj) do
-                                keys[#keys + 1] = tostring(k)
+            -- full-map area queries silently return empty; tile the map
+            -- into a 4x4 grid of small area queries instead
+            local step = math.ceil(mapW / 4)
+            for gy = 0, mapH - 1, step do
+                for gx = 0, mapW - 1, step do
+                    pcall(function()
+                        local gst = GetObjectStates(GetObjectsInArea(
+                            Vector2(gx, gy),
+                            Vector2(math.min(gx + step, mapW),
+                                    math.min(gy + step, mapH))))
+                        if gst and gst.id then
+                            for i = 1, #gst.id do
+                                local tag = fishTypes[gst.unitType[i]]
+                                if tag then
+                                    table.insert(m, { gst.id[i], 0,
+                                        gst.unitType[i],
+                                        round1(gst.x[i]),
+                                        round1(gst.y[i]), tag })
+                                end
                             end
-                        end)
-                        pcall(function()
-                            keys[#keys + 1] = "type=" .. tostring(ut)
-                        end)
-                        local kk = "keys:" .. table.concat(keys, ",")
-                        gaiaHistAcc[kk] = (gaiaHistAcc[kk] or 0) + 1
-                    end
+                        end
+                    end)
                 end
-                if not gaiaHistSent then
-                    local tk = "total:" .. tostring(n)
-                    gaiaHistAcc[tk] = (gaiaHistAcc[tk] or 0) + 1
-                end
-            end)
-        end
-        if not gaiaHistSent and GetGameTime() > 60 then
-            gaiaHistSent = true
-            send("api6_hist", { hist = gaiaHistAcc })
+            end
         end
         send("objects", { b = b, v = v, m = m })
     end
