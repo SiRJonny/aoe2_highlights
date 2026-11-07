@@ -67,13 +67,16 @@ def switch_to_replay_tab():
 
 def close_control_menu():
     """The CONTROL overlay blocks game UI clicks; close it (Menu Toggle
-    Key is Shift) when it is open. True when the menu is not open."""
-    for _ in range(2):
+    Key is Shift). The overlay polls keys at 50ms, so HOLD the key —
+    short presses slip past."""
+    for _ in range(3):
         if game.locate_anchor("control_menu_open", threshold=0.85) is None:
             return True
-        print("control menu open -> toggle (shift)")
+        print("control menu open -> toggle (shift, held)")
         game.focus_window()
-        game.pyautogui.press("shift")
+        game.pyautogui.keyDown("shift")
+        time.sleep(0.5)
+        game.pyautogui.keyUp("shift")
         time.sleep(1.2)
     return game.locate_anchor("control_menu_open", threshold=0.85) is None
 
