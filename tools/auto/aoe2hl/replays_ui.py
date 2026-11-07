@@ -65,11 +65,22 @@ def switch_to_replay_tab():
     step("searchbar", game.wait_anchor, "replays_searchbar", timeout=15)
 
 
-def prime_search(term):
+def searchbar_pos():
+    """Searchbar coords: template match when possible, window-relative
+    fallback otherwise (a focused searchbar's glow breaks the anchor
+    template; the fallback was measured on the 1080p fullscreen
+    layout)."""
     sb = game.locate_anchor("replays_searchbar")
-    if not sb:
-        game.save_debug("fail_searchbar_not_found")
-        raise UIError("searchbar not found")
+    if sb:
+        return sb[0], sb[1]
+    wr = game.window_rect()
+    return wr["left"] + 486, wr["top"] + 178
+
+
+def prime_search(term):
+    sb = searchbar_pos()
+    game.focus_window()
+    time.sleep(0.3)
     game.pyautogui.click(sb[0], sb[1])
     time.sleep(0.7)
     game.pyautogui.hotkey("ctrl", "a")
@@ -83,9 +94,7 @@ def pick_row(row):
         raise UIError("only row 1 is supported: reorder the replays list "
                       "by copying/touching replay files (row heights vary "
                       "and hover-scroll breaks detection)")
-    sb = game.locate_anchor("replays_searchbar")
-    if not sb:
-        sb = (486, 178)             # measured 1080p fallback
+    sb = searchbar_pos()
     game.focus_window()
     time.sleep(0.3)
     # row 1 center: the list re-scans on entry and newest file is on top
@@ -99,9 +108,7 @@ def clear_search():
     The box keeps its text across screens and pyautogui keystrokes
     sometimes land late; blur afterwards so the searchbar anchor
     template matches again (the focus glow breaks it)."""
-    sb = game.locate_anchor("replays_searchbar")
-    if not sb:
-        sb = (486, 178)
+    sb = searchbar_pos()
     game.focus_window()
     time.sleep(0.3)
     game.pyautogui.click(sb[0] + 40, sb[1])
