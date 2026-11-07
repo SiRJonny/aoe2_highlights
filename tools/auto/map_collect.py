@@ -100,6 +100,11 @@ def main():
         capture.log("WARNING: no replay file -- terrain image skipped "
                     "(webapp falls back to flat background)")
 
+    # stop the replay once the data is in: leave the end screen (or quit
+    # a still-running replay) and park the game at the replay list
+    if replays_ui.wind_down():
+        capture.log("parked at replay list")
+
 
 if __name__ == "__main__":
     main()

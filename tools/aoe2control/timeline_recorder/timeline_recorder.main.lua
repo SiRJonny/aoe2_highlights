@@ -294,8 +294,8 @@ function Init()
     -- one-shot probes must re-arm here or the first load eats them
     gaiaHistSent = false
     gaiaHistAcc = {}
-    chatSeen = 0
-    militaryClasses = findMilitaryClasses()
+    api4Sent = false
+    chatSeen = 0    militaryClasses = findMilitaryClasses()
     if #militaryClasses > 0 then
         Log("timeline_recorder: pipe " .. PIPE .. " started, "
             .. countHouseTypes() .. " house types known, "
@@ -909,6 +909,7 @@ local scoreSig = nil
 local chatSeen = 0
 local gaiaHistAcc = {}      -- gaia unit-type histogram (diagnosis)
 local gaiaHistSent = false
+local api4Sent = false      -- one-time object census probe
 local function scoreCall(pid)
     local factIdx = Fact.CURRENT_SCORE
     if scoreSig == "method" then
@@ -1290,6 +1291,44 @@ local function sample()
         if not gaiaHistSent and GetGameTime() > 40 then
             gaiaHistSent = true
             send("api3_gaia", { hist = gaiaHistAcc })
+        end
+        -- api4: definitive object census. (a) every UnitObjectType
+        -- member -> object count via GetObjectsByType; (b) full-map
+        -- GetObjectsInArea sweep -> pid:type histogram of EVERYTHING.
+        -- Answers where gaia fish actually live.
+        if not api4Sent and GetGameTime() > 45 then
+            api4Sent = true
+            pcall(function()
+                local ot = {}
+                pcall(function()
+                    for name, val in pairs(UnitObjectType) do
+                        local ok, st = pcall(function()
+                            return GetObjectStates(GetObjectsByType(val))
+                        end)
+                        ot[name .. "=" .. tostring(val)] =
+                            (ok and st and st.id) and #st.id or -1
+                    end
+                end)
+                send("api4_ot", { counts = ot })
+            end)
+            pcall(function()
+                local hist = {}
+                local w, h = GetMapWidth(), GetMapHeight()
+                local ok, st = pcall(function()
+                    return GetObjectStates(
+                        GetObjectsInArea(0, 0, w, h))
+                end)
+                if ok and st and st.id then
+                    for i = 1, #st.id do
+                        local key = tostring(st.playerId[i]) .. ":"
+                            .. tostring(st.unitType[i])
+                        hist[key] = (hist[key] or 0) + 1
+                    end
+                else
+                    hist["ERROR"] = tostring(st)
+                end
+                send("api4_area", { hist = hist })
+            end)
         end
         send("objects", { b = b, v = v, m = m })
     end

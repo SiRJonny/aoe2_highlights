@@ -173,15 +173,18 @@ def run(row, search):
         return False
 
 
-def _run(row, search):
+def reach_replay_list(max_loops=12):
+    """Run the state machine until the replay list is on screen: handles
+    finished-replay end screens, statistics, open match menus and
+    mid-replay quits along the way. True when at the list."""
     game.focus_window()
     time.sleep(0.5)
 
     # State machine to reach the replay list from anywhere.
-    for state in range(12):
+    for state in range(max_loops):
         if game.hit_anchor("load_replay_header"):
             print("at replay list")
-            break
+            return True
         elif game.locate_anchor("return_to_replays_button") is not None:
             hit = game.locate_anchor("return_to_replays_button")
             print("statistics -> return to replays")
@@ -219,6 +222,23 @@ def _run(row, search):
             game.focus_window()
             game.pyautogui.press("escape")
             time.sleep(1.5)
+    return game.hit_anchor("load_replay_header")
+
+
+def wind_down(max_loops=8):
+    """After a collect: stop the replay (leave end screen / quit a still-
+    running replay) and park the game at the replay list."""
+    try:
+        ok = reach_replay_list(max_loops)
+        print("wind down:", "at replay list" if ok else "unresolved state")
+        return ok
+    except Exception as exc:                    # noqa: BLE001
+        print("wind down failed:", exc)
+        return False
+
+
+def _run(row, search):
+    reach_replay_list(12)
 
     if search:
         print(f"search '{search}'")
