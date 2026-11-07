@@ -36,7 +36,7 @@ def unload_key():
     vk_names = {46: "delete", 45: "insert", 36: "home", 35: "end",
                 33: "pageup", 34: "pagedown", 19: "pause",
                 123: "f12", 144: "numlock", 27: "esc"}
-    ini = HERE.parent / "aoe2control" / "settings.timeline.ini"
+    ini = ROOT / "tools" / "aoe2control" / "settings.timeline.ini"
     vk = 45
     try:
         for line in ini.read_text(encoding="utf-8").splitlines():
