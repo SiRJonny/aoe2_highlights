@@ -419,7 +419,17 @@ local function handleCommands()
                 speedName = msg.speedName,
             }
             send("ack", { action = "seek", t = seek.t })
-        elseif action == "map_mode" then
+        elseif action == "fish_points" then
+        -- camera targets over the water: the collector picked them from
+        -- the terrain; the sweep moves the camera point by point (area
+        -- queries only see loaded objects near the camera)
+        fishPoints = msg.points or {}
+        fishIdx = 0
+        fishRows = {}
+        fishPendingCam = nil
+        fishActive = true
+        send("ack", { action = action })
+    elseif action == "map_mode" then
             mapMode = msg.on ~= false
             -- (re)send meta + tc snapshots: the map client may attach
             -- mid-replay and would otherwise never see players, map
@@ -917,6 +927,14 @@ local api10Done = false     -- one-time camera-area sweep
 local api9Sent = false      -- one-time numeric type-id sweep
 local mapW, mapH = 0, 0     -- map size, captured when the meta is sent
 local mapTicks = 0          -- snapshots since the match started
+local fishTypes = { [53] = "fs", [69] = "fs", [455] = "fs",
+                    [456] = "fs", [457] = "fs", [458] = "fs",
+                    [450] = "f", [451] = "f" }
+local fishPoints = nil      -- camera targets for the fish sweep
+local fishIdx = 0
+local fishPendingCam = nil  -- camera moved this tick, query next tick
+local fishRows = {}         -- accumulated fish rows
+local fishActive = false
 local gaiaHistAcc = {}      -- one-shot census of the area-sweep population
 local gaiaHistSent = false
 local fishCache = nil       -- fish rows from the last area sweep
@@ -1379,31 +1397,38 @@ local function sample()
         if mapTicks == 45 and not api9Sent then
             api9Sent = true
             pcall(function()
-                local counts, firstPos = {}, {}
-                for tid = 0, 2999 do
-                    local ok, st = pcall(function()
-                        return GetObjectStates(GetObjectsByType(tid))
-                    end)
-                    if ok and st and st.id and #st.id > 0 then
-                        counts[tostring(tid)] = #st.id
-                        firstPos[tostring(tid)] =
-                            tostring(math.floor(st.x[1] or 0)) .. "," ..
-                            tostring(math.floor(st.y[1] or 0))
+                local counts, firstPos, names = {}, {}, {}
+                pcall(function()
+                    for name, tid in pairs(UnitObjectType) do
+                        local ok, st = pcall(function()
+                            return GetObjectStates(GetObjectsByType(tid))
+                        end)
+                        if ok and st and st.id and #st.id > 0 then
+                            counts[tostring(tid)] = #st.id
+                            firstPos[tostring(tid)] =
+                                tostring(math.floor(st.x[1] or 0)) .. "," ..
+                                tostring(math.floor(st.y[1] or 0))
+                            names[tostring(tid)] = name
+                        end
                     end
-                end
-                send("api9_types", { counts = counts, firstPos = firstPos })
+                end)
+                send("api9_types", {
+                    counts = counts, firstPos = firstPos, names = names })
             end)
             pcall(function()
-                local cls = {}
-                for cid = -1, 299 do
-                    local ok, st = pcall(function()
-                        return GetObjectStates(GetObjectsByClass(cid))
-                    end)
-                    if ok and st and st.id and #st.id > 0 then
-                        cls[tostring(cid)] = #st.id
+                local cls, cnames = {}, {}
+                pcall(function()
+                    for name, cid in pairs(UnitClass) do
+                        local ok, st = pcall(function()
+                            return GetObjectStates(GetObjectsByClass(cid))
+                        end)
+                        if ok and st and st.id and #st.id > 0 then
+                            cls[tostring(cid)] = #st.id
+                            cnames[tostring(cid)] = name
+                        end
                     end
-                end
-                send("api9_classes", { counts = cls })
+                end)
+                send("api9_classes", { counts = cls, names = cnames })
             end)
         end
         send("objects", { b = b, v = v, m = m })
@@ -1459,6 +1484,42 @@ function Update()
     end
 
     local t = GetGameTime()
+    -- fish sweep: move the camera over the water points (one point per
+    -- two ticks: move, then query around it); area queries only see
+    -- loaded objects near the camera
+    if fishActive and fishPoints then
+        if fishPendingCam then
+            local p = fishPendingCam
+            fishPendingCam = nil
+            pcall(function()
+                local gst = GetObjectStates(GetObjectsInArea(
+                    Vector2(p.x - 25, p.y - 25),
+                    Vector2(p.x + 25, p.y + 25)))
+                if gst and gst.id then
+                    for i = 1, #gst.id do
+                        local tag = fishTypes[gst.unitType[i]]
+                        if tag then
+                            table.insert(fishRows, { gst.id[i], 0,
+                                gst.unitType[i], round1(gst.x[i]),
+                                round1(gst.y[i]), tag })
+                        end
+                    end
+                end
+            end)
+            fishIdx = fishIdx + 1
+            if fishIdx >= #fishPoints then
+                fishActive = false
+                fishPoints = nil
+                send("fish_done", { count = #fishRows })
+            end
+        else
+            local p = fishPoints[fishIdx + 1]
+            if p then
+                SetCameraPosition(Vector2(p.x, p.y))
+                fishPendingCam = p
+            end
+        end
+    end
     -- time can go backwards (replay restart/rewind): reset the schedule
     if lastT and t and t < lastT then
         nextSampleTime = 0
