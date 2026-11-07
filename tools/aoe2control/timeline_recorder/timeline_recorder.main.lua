@@ -1230,8 +1230,6 @@ local function sample()
         local gtagClasses = {
             a = { "DOMESTIC_ANIMAL", "PREY_ANIMAL", "PREDATOR_ANIMAL",
                   "CONTROLLED_ANIMAL" },
-            f = { "DEEPSEA_FISH", "OCEAN_FISH" },
-            fs = { "SHORE_FISH" },
         }
         for gtag, gnames in pairs(gtagClasses) do
             for _, cn in ipairs(gnames) do
@@ -1249,6 +1247,27 @@ local function sample()
                         end
                     end)
                 end
+            end
+        end
+        -- fish live outside the UnitClass buckets in DE (the FISH class
+        -- queries return nothing) -> query by type instead, ids from
+        -- aoc-reference-data: shore/species fish vs great marlin
+        local gTypeGroups = {
+            fs = { 53, 69, 455, 456, 457, 458 },
+            f = { 450, 451 },
+        }
+        for gtag, tids in pairs(gTypeGroups) do
+            for _, ot in ipairs(tids) do
+                pcall(function()
+                    local gst = GetObjectStates(GetObjectsByType(ot))
+                    if gst and gst.id then
+                        for i = 1, #gst.id do
+                            table.insert(m, { gst.id[i], 0, gst.unitType[i],
+                                              round1(gst.x[i]),
+                                              round1(gst.y[i]), gtag })
+                        end
+                    end
+                end)
             end
         end
         send("objects", { b = b, v = v, m = m })
