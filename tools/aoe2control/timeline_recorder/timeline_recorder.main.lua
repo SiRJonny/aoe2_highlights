@@ -911,6 +911,8 @@ end
 -- "fp" = GetFact(fact, pid), "pf" = GetFact(pid, fact)); "none" when
 -- nothing works -> the client falls back to its eco count
 local scoreSig = nil
+local api8Done = false      -- one-time corner probe via raw objects
+local api9Sent = false      -- one-time numeric type-id sweep
 local mapW, mapH = 0, 0     -- map size, captured when the meta is sent
 local gaiaHistAcc = {}      -- one-shot census of the area-sweep population
 local gaiaHistSent = false
@@ -1350,6 +1352,38 @@ local function sample()
                 else
                     send("api8_hist", { n = "ERR " .. tostring(hst) })
                 end
+            end)
+        end
+        -- api9: numeric sweep of ALL unit type ids (the enum only names
+        -- 588 of them — a fish type id may be missing from the enum)
+        if GetGameTime() > 40 and not api9Sent then
+            api9Sent = true
+            pcall(function()
+                local counts, firstPos = {}, {}
+                for tid = 0, 2999 do
+                    local ok, st = pcall(function()
+                        return GetObjectStates(GetObjectsByType(tid))
+                    end)
+                    if ok and st and st.id and #st.id > 0 then
+                        counts[tostring(tid)] = #st.id
+                        firstPos[tostring(tid)] =
+                            tostring(math.floor(st.x[1] or 0)) .. "," ..
+                            tostring(math.floor(st.y[1] or 0))
+                    end
+                end
+                send("api9_types", { counts = counts, firstPos = firstPos })
+            end)
+            pcall(function()
+                local cls = {}
+                for cid = -1, 299 do
+                    local ok, st = pcall(function()
+                        return GetObjectStates(GetObjectsByClass(cid))
+                    end)
+                    if ok and st and st.id and #st.id > 0 then
+                        cls[tostring(cid)] = #st.id
+                    end
+                end
+                send("api9_classes", { counts = cls })
             end)
         end
         send("objects", { b = b, v = v, m = m })
