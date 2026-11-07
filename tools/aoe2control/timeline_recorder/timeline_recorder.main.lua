@@ -1436,6 +1436,8 @@ local function sample()
                     end
                 end)
             end
+            send("api9_progress", { idx = api9Idx,
+                total = #api9Members })
             if api9Idx >= #api9Members then
                 api9Sent = true
                 api9Members = nil
