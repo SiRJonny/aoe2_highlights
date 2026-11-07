@@ -289,6 +289,9 @@ local function findMilitaryClasses()
 end
 
 function Init()
+    -- close the CONTROL menu: while it is open it blocks game UI
+    -- clicks (the Load Replay button included)
+    pcall(function() SetEngineUIVisibility(false) end)
     IPC.StartServer(PIPE)
     buildHouseTypeSet()
     buildAnimalTypeSet()
