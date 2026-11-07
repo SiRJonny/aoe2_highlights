@@ -1442,6 +1442,15 @@ function Update()
         tcSeen = {}
         snapSent = false
         pan = nil
+        -- per-match state too: the menu phase after inject runs the
+        -- snapshot block with leftover game time and consumes one-shot
+        -- state (the empty sweep assigned an empty fishCache there)
+        fishCache = nil
+        fishLastSweep = -1e9
+        gaiaHistAcc = {}
+        gaiaHistSent = false
+        mapTicks = 0
+        api9Sent = false
     end
     lastT = t
 
