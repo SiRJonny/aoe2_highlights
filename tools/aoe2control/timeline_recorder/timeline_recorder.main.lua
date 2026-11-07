@@ -1394,42 +1394,54 @@ local function sample()
         if mapW > 0 then
             mapTicks = mapTicks + 1
         end
-        if mapTicks == 45 and not api9Sent then
-            api9Sent = true
-            pcall(function()
-                local counts, firstPos, names = {}, {}, {}
+        -- api9 (chunked): sweep all named UnitObjectType + UnitClass
+        -- members, 100 per sample tick - a full sweep in one tick
+        -- overruns the Update and gets killed mid-send
+        if mapTicks > 20 and not api9Sent then
+            if not api9Members then
+                api9Members = {}
+                for name, tid in pairs(UnitObjectType) do
+                    table.insert(api9Members, { tid = tid, name = name })
+                end
+                for name, cid in pairs(UnitClass) do
+                    table.insert(api9Members, { tid = cid, name = name,
+                                                isClass = true })
+                end
+                table.sort(api9Members, function(a, b)
+                    return a.name < b.name
+                end)
+                api9Idx = 0
+                api9Counts = {}
+                api9First = {}
+                api9Names = {}
+            end
+            for _ = 1, 100 do
+                api9Idx = api9Idx + 1
+                local m = api9Members[api9Idx]
+                if not m then break end
                 pcall(function()
-                    for name, tid in pairs(UnitObjectType) do
-                        local ok, st = pcall(function()
-                            return GetObjectStates(GetObjectsByType(tid))
-                        end)
-                        if ok and st and st.id and #st.id > 0 then
-                            counts[tostring(tid)] = #st.id
-                            firstPos[tostring(tid)] =
-                                tostring(math.floor(st.x[1] or 0)) .. "," ..
-                                tostring(math.floor(st.y[1] or 0))
-                            names[tostring(tid)] = name
+                    local ok, st = pcall(function()
+                        if m.isClass then
+                            return GetObjectStates(
+                                GetObjectsByClass(m.tid))
                         end
+                        return GetObjectStates(GetObjectsByType(m.tid))
+                    end)
+                    if ok and st and st.id and #st.id > 0 then
+                        api9Counts[tostring(m.tid)] = #st.id
+                        api9First[tostring(m.tid)] =
+                            tostring(math.floor(st.x[1] or 0)) .. "," ..
+                            tostring(math.floor(st.y[1] or 0))
+                        api9Names[tostring(m.tid)] = m.name
                     end
                 end)
-                send("api9_types", {
-                    counts = counts, firstPos = firstPos, names = names })
-            end)
-            pcall(function()
-                local cls, cnames = {}, {}
-                pcall(function()
-                    for name, cid in pairs(UnitClass) do
-                        local ok, st = pcall(function()
-                            return GetObjectStates(GetObjectsByClass(cid))
-                        end)
-                        if ok and st and st.id and #st.id > 0 then
-                            cls[tostring(cid)] = #st.id
-                            cnames[tostring(cid)] = name
-                        end
-                    end
-                end)
-                send("api9_classes", { counts = cls, names = cnames })
-            end)
+            end
+            if api9Idx >= #api9Members then
+                api9Sent = true
+                api9Members = nil
+                send("api9_types", { counts = api9Counts,
+                    firstPos = api9First, names = api9Names })
+            end
         end
         send("objects", { b = b, v = v, m = m })
         -- api10: sweep around the CAMERA - area queries may only see
