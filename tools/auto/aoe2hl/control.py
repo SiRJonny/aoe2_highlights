@@ -66,8 +66,12 @@ def unload_module(max_tries=3):
             gameui.pyautogui.click(sb[0], sb[1])
             time.sleep(0.3)
         for key in keys:
-            gameui.pyautogui.press(key)
-            time.sleep(2)
+            # hold ~0.5s: the module polls keys at 50ms Update intervals
+            # and a short press slips past it
+            gameui.pyautogui.keyDown(key)
+            time.sleep(0.5)
+            gameui.pyautogui.keyUp(key)
+            time.sleep(1.5)
             if not control_running():
                 return True
     return not control_running()
