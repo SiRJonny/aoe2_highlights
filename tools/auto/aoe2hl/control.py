@@ -51,6 +51,7 @@ def unload_key():
 def unload_module(max_tries=3):
     """Press the module's unload hotkey (focused) until the pipe is gone."""
     from aoe2hl import gameui
+    import time
     key = unload_key()
     for attempt in range(max_tries):
         gameui.focus_window()
