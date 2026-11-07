@@ -1400,6 +1400,38 @@ local function sample()
                     send("api5_area", { name = v[1], n = n })
                 end)
             end
+            -- what does GetObjectStates return for an area collection?
+            pcall(function()
+                local ok, st = pcall(function()
+                    return GetObjectStates(
+                        GetObjectsInArea(Vector2(0, 0), Vector2(231, 231)))
+                end)
+                local keys = {}
+                if ok and type(st) == "table" then
+                    for k, v in pairs(st) do
+                        keys[#keys + 1] = tostring(k) .. ":" .. type(v)
+                    end
+                else
+                    keys[#keys + 1] = "ERR " .. tostring(st)
+                end
+                send("api5_keys", { keys = keys })
+            end)
+            -- raw collection keys (before GetObjectStates)
+            pcall(function()
+                local ok, col = pcall(function()
+                    return GetObjectsInArea(Vector2(0, 0), Vector2(231, 231))
+                end)
+                local keys = {}
+                if ok and type(col) == "table" then
+                    for k, v in pairs(col) do
+                        keys[#keys + 1] = tostring(k) .. ":" .. type(v)
+                    end
+                    keys[#keys + 1] = "count=" .. tostring(#col)
+                else
+                    keys[#keys + 1] = "ERR " .. tostring(col)
+                end
+                send("api5_rawkeys", { keys = keys })
+            end)
         end
         send("objects", { b = b, v = v, m = m })
     end
