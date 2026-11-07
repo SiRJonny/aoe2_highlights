@@ -1252,10 +1252,10 @@ local function sample()
             end
         end
         -- fish live outside the UnitClass buckets in DE (the FISH class
-        -- queries return nothing) -> sweep ALL_UNITS for gaia objects
-        -- and tag fish by type (ids from aoc-reference-data: shore/
-        -- species fish vs great marlin). Unknown gaia types accumulate
-        -- into a histogram that ships once (api3_gaia) for diagnosis.
+        -- queries return nothing) -> sweep ALL_UNITS and tag fish by
+        -- type (ids from aoc-reference-data). Everything else lands in
+        -- a pid:type histogram that ships once (api3_gaia) — the first
+        -- run proved our gaia-player filter was wrong, so no filtering.
         local gseen = {}
         local fishTypes = { [53] = "fs", [69] = "fs", [455] = "fs",
                             [456] = "fs", [457] = "fs", [458] = "fs",
@@ -1263,22 +1263,22 @@ local function sample()
         pcall(function()
             local gst = GetObjectStates(
                 GetObjectsByClass(UnitClass.ALL_UNITS))
-            if gst and gst.id then
-                for i = 1, #gst.id do
-                    local pid = gst.playerId[i]
-                    local id = gst.id[i]
-                    if (pid == 0 or pid == -1) and not gseen[id] then
-                        local ut = gst.unitType[i]
-                        local tag = fishTypes[ut]
-                        if tag then
-                            gseen[id] = true
-                            table.insert(m, { id, 0, ut, round1(gst.x[i]),
-                                              round1(gst.y[i]), tag })
-                        elseif gaiaHistAcc then
-                            gaiaHistAcc[tostring(ut)] =
-                                (gaiaHistAcc[tostring(ut)] or 0) + 1
-                        end
-                    end
+            if not (gst and gst.id) then
+                gaiaHistAcc["NO_STATES"] = (gaiaHistAcc["NO_STATES"] or 0) + 1
+                return
+            end
+            for i = 1, #gst.id do
+                local id = gst.id[i]
+                local pid = gst.playerId[i]
+                local ut = gst.unitType[i]
+                local tag = fishTypes[ut]
+                if tag and not gseen[id] then
+                    gseen[id] = true
+                    table.insert(m, { id, 0, ut, round1(gst.x[i]),
+                                      round1(gst.y[i]), tag })
+                else
+                    local key = tostring(pid) .. ":" .. tostring(ut)
+                    gaiaHistAcc[key] = (gaiaHistAcc[key] or 0) + 1
                 end
             end
         end)
