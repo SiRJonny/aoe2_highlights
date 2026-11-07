@@ -290,6 +290,11 @@ function Init()
     IPC.StartServer(PIPE)
     buildHouseTypeSet()
     buildAnimalTypeSet()
+    -- per-game-load state: file-locals persist across menu phases, so
+    -- one-shot probes must re-arm here or the first load eats them
+    gaiaHistSent = false
+    gaiaHistAcc = {}
+    chatSeen = 0
     militaryClasses = findMilitaryClasses()
     if #militaryClasses > 0 then
         Log("timeline_recorder: pipe " .. PIPE .. " started, "
