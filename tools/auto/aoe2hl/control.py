@@ -49,17 +49,27 @@ def unload_key():
 
 
 def unload_module(max_tries=3):
-    """Press the module's unload hotkey (focused) until the pipe is gone."""
+    """Press the module's unload hotkey until the pipe is gone.
+
+    Defuse: when the replay list is open, click into the searchbar text
+    field first so a Delete keypress edits text instead of triggering
+    the delete-replay confirmation. Tries the configured key, then
+    'delete' (the previous default still live in already-running
+    modules)."""
     from aoe2hl import gameui
     import time
-    key = unload_key()
+    keys = [unload_key(), "delete"]
     for attempt in range(max_tries):
         gameui.focus_window()
-        gameui.pyautogui.press(key)
-        time.sleep(3)
-        if not control_running():
-            return True
-        print(f"module still running after {key} (attempt {attempt})")
+        sb = gameui.locate_anchor("replays_searchbar")
+        if sb:
+            gameui.pyautogui.click(sb[0], sb[1])
+            time.sleep(0.3)
+        for key in keys:
+            gameui.pyautogui.press(key)
+            time.sleep(2)
+            if not control_running():
+                return True
     return not control_running()
 
 
