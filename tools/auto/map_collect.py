@@ -58,7 +58,16 @@ def main():
     if args.touch:
         os.utime(args.touch)        # newest mtime -> row 1 in the UI
         capture.log(f"touched {args.touch}")
-    if not replays_ui.run(args.row, args.search):
+    search = args.search
+    if not search and args.touch:
+        # the DE replay search only matches the part of the name after
+        # the @ sign ("MP Replay v101.103.57257.0 @2026.11.01 200634 (2)"
+        # -> "2026.11.01 200634 (2)"), so search for exactly that
+        stem = Path(args.touch).stem
+        if "@" in stem:
+            search = stem.split("@", 1)[1].strip()
+            capture.log(f"search '{search}' (from @ in the file name)")
+    if not replays_ui.run(args.row, search):
         capture.log("WARNING: UI start reported failure; still waiting "
                     "for the module pipe")
     time.sleep(4)

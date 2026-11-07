@@ -1224,6 +1224,33 @@ local function sample()
                 end
             end
         end)
+        -- gaia layer for the map: animals (olive dots) and fish (white
+        -- markers), owner 0 = gaia; row[5] tag picks the client style:
+        -- a = animal, f = big fish (icon), fs = small fish (dot)
+        local gtagClasses = {
+            a = { "DOMESTIC_ANIMAL", "PREY_ANIMAL", "PREDATOR_ANIMAL",
+                  "CONTROLLED_ANIMAL" },
+            f = { "DEEPSEA_FISH", "OCEAN_FISH" },
+            fs = { "SHORE_FISH" },
+        }
+        for gtag, gnames in pairs(gtagClasses) do
+            for _, cn in ipairs(gnames) do
+                if UnitClass[cn] then
+                    pcall(function()
+                        local gst = GetObjectStates(
+                            GetObjectsByClass(UnitClass[cn]))
+                        if gst and gst.id then
+                            for i = 1, #gst.id do
+                                table.insert(m, { gst.id[i], 0,
+                                                  gst.unitType[i],
+                                                  round1(gst.x[i]),
+                                                  round1(gst.y[i]), gtag })
+                            end
+                        end
+                    end)
+                end
+            end
+        end
         send("objects", { b = b, v = v, m = m })
     end
     if not snapSent then

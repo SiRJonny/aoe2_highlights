@@ -176,6 +176,26 @@ const SHIP_SHAPE = (ctx, color) => {
   ctx.stroke();
 };
 
+/* Fish marker (gaia deep-sea fish): white body + tail, dark eye. */
+const FISH_SHAPE = (ctx) => {
+  ctx.fillStyle = "#f5f5f5";
+  ctx.beginPath();
+  ctx.ellipse(9.5, 12, 6, 3.4, 0, 0, 6.2832);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(14.5, 12);
+  ctx.lineTo(19.5, 8.5);
+  ctx.lineTo(19.5, 15.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#182018";
+  ctx.beginPath();
+  ctx.arc(6.5, 11, 0.9, 0, 6.2832);
+  ctx.fill();
+};
+
 /* Cavalry marker: small horse/rider silhouette (chess-knight profile).
  * Same 24x24 design box; the app scales it per dot. */
 const CAVALRY_SHAPE = (ctx, color) => {

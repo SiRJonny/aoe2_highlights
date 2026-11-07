@@ -244,11 +244,35 @@ function draw() {
       const kind = circular ? null : notableKindFor(row[2]);
       let size = (kind ? SIZES.notable : SIZES[sizeKey]) * tile;
       if (circular) {
-        // infantry vs cavalry vs warships: the Lua side tags row[5]
+        // tags from the Lua side: i infantry, c cavalry, s warship,
+        // a gaia animal, f big fish, fs small fish
         const tag5 = p[2] && p[2][5];
         const mult = tag5 === "c" ? SIZES.cav
                    : tag5 === "i" ? SIZES.inf : 1;
         size *= mult * SIZES.dot;
+        if (tag5 === "a" || tag5 === "fs") {
+          // gaia animal: small olive dot; small fish: white dot
+          ctx.fillStyle = tag5 === "a" ? "#808000" : "#f5f5f5";
+          ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
+          ctx.beginPath();
+          ctx.arc(x, y, Math.max(1.3, size * 0.45), 0, 6.2832);
+          ctx.fill();
+          ctx.stroke();
+          continue;
+        }
+        if (tag5 === "f") {
+          // deep-sea fish: white fish icon
+          ctx.save();
+          ctx.translate(x, y);
+          const box = size * 2.8;
+          ctx.scale(box / 24, box / 24);
+          ctx.translate(-12, -12);
+          ctx.lineWidth = 2; ctx.lineJoin = "round";
+          ctx.strokeStyle = "rgba(0,0,0,.6)";
+          FISH_SHAPE(ctx);
+          ctx.restore();
+          continue;
+        }
         if (tag5 === "c" || tag5 === "i" || tag5 === "s") {
           // silhouette marker; ships get a much larger box (they read
           // poorly at dot size), the box may exceed the dot footprint
