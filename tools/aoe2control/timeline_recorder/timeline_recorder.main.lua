@@ -941,6 +941,7 @@ local api10Done = false     -- one-time camera-area sweep
 local api9Sent = false      -- one-time numeric type-id sweep
 local api12Done = false     -- one-shot GetObjectsPtr raw buffer probe
 local api13Sent = false     -- one-shot type-id name/class probe
+local api14Sent = false     -- one-shot per-object name/class probe
 local function scoreCall(pid)
     local factIdx = Fact.CURRENT_SCORE
     if scoreSig == "method" then
@@ -1500,6 +1501,37 @@ local function sample()
                                     classes = classes })
             end)
         end
+        -- api14: real object handles for the raw-buffer types - the
+        -- objects' own GetName/GetTypeName/GetClass settle what
+        -- 1148/396/2596 are (deer 65 as the calibration row)
+        if mapTicks > 18 and not api14Sent then
+            api14Sent = true
+            pcall(function()
+                local out = {}
+                for _, tid in ipairs({ 1148, 396, 2596, 389, 1028, 65 }) do
+                    local ok, objs = pcall(function()
+                        return GetObjectsByType(tid) end)
+                    if ok and objs then
+                        local entries = {}
+                        for i = 1, math.min(3, #objs) do
+                            local o = objs[i]
+                            local e = {}
+                            local ok2, nm = pcall(o.GetName, o)
+                            if ok2 then e.name = nm end
+                            local ok3, tn = pcall(o.GetTypeName, o)
+                            if ok3 then e.typeName = tn end
+                            local ok4, cl = pcall(o.GetClass, o)
+                            if ok4 then e.cls = cl end
+                            table.insert(entries, e)
+                        end
+                        out[tostring(tid)] = { n = #objs, objs = entries }
+                    else
+                        out[tostring(tid)] = { n = 0, err = tostring(objs) }
+                    end
+                end
+                send("api14_names", { out = out })
+            end)
+        end
         -- api11: the GAIA player's own object list - fish belong to
         -- gaia and the global queries returned none of them
         if mapTicks > 30 and not api11Sent then
@@ -1657,6 +1689,7 @@ function Update()
         api9Sent = false
         api12Done = false
         api13Sent = false
+        api14Sent = false
     end
     lastT = t
 
