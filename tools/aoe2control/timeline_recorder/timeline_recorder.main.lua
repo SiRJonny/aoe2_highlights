@@ -940,6 +940,7 @@ local api8Done = false      -- one-time corner probe via raw objects
 local api10Done = false     -- one-time camera-area sweep
 local api9Sent = false      -- one-time numeric type-id sweep
 local api12Done = false     -- one-shot GetObjectsPtr raw buffer probe
+local api13Sent = false     -- one-shot type-id name/class probe
 local function scoreCall(pid)
     local factIdx = Fact.CURRENT_SCORE
     if scoreSig == "method" then
@@ -1461,6 +1462,44 @@ local function sample()
                                     count = tonumber(count) or 0 })
             end)
         end
+        -- api13: the engine's own answer about the raw-buffer types the
+        -- static enum does not name: object count per id, the unit class
+        -- of each id, and the full runtime enum dump
+        if mapTicks > 15 and not api13Sent then
+            api13Sent = true
+            pcall(function()
+                local res = {}
+                for _, tid in ipairs({ 1148, 396, 2596, 389, 1028,
+                                       53, 69, 455, 456, 457, 458,
+                                       450, 451 }) do
+                    local e = { n = 0, cls = nil, first = nil }
+                    local ok, objs = pcall(function()
+                        return GetObjectsByType(tid) end)
+                    if ok and objs then
+                        e.n = #objs
+                        local st = GetObjectStates(objs)
+                        if st and st.x and st.x[1] then
+                            e.first = tostring(math.floor(st.x[1]))
+                                .. "," .. tostring(math.floor(st.y[1]))
+                        end
+                    end
+                    local ok2, cls = pcall(function()
+                        return GetObjectTypeData(tid, ObjectData.CLASS) end)
+                    if ok2 then e.cls = cls end
+                    res[tostring(tid)] = e
+                end
+                local enum = {}
+                for name, tid in pairs(UnitObjectType) do
+                    enum[tostring(tid)] = name
+                end
+                local classes = {}
+                for name, cid in pairs(UnitClass) do
+                    classes[tostring(cid)] = name
+                end
+                send("api13_ids", { res = res, enum = enum,
+                                    classes = classes })
+            end)
+        end
         -- api11: the GAIA player's own object list - fish belong to
         -- gaia and the global queries returned none of them
         if mapTicks > 30 and not api11Sent then
@@ -1617,6 +1656,7 @@ function Update()
         mapTicks = 0
         api9Sent = false
         api12Done = false
+        api13Sent = false
     end
     lastT = t
 
