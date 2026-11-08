@@ -132,16 +132,9 @@ def collect_positions(handle, positions_path, max_minutes):
                 rt = r.get("type")
                 if rt == "api12_ptr":
                     _read_objects_raw(r, positions_path, fh)
-                if (rt not in ("meta", "objects", "tc_snap", "stats", "api",
-                               "scores", "chat", "bld_event", "api3_gaia",
-                               "api4_ot", "api4_area", "api4_fishtypes",
-                               "api5_area", "api5_keys", "api5_rawkeys",
-                               "api6_hist", "api7_shiparea", "api8_corner",
-                               "api8_hist", "api9_types", "api9_classes",
-                               "api9_progress", "api9_started", "api10_cam",
-                               "api11_gaia", "api11_fishtypes", "api12_ptr",
-                               "api13_ids", "api14_names", "tick")
-                        and not rt.startswith("api2")):
+                if (rt not in ("meta", "objects", "tc_snap", "stats",
+                               "scores", "chat", "bld_event", "api12_ptr",
+                               "tick")):
                     continue
                 t = r.get("time")
                 if t and (last_t is None or t > last_t):
