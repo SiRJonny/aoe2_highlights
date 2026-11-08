@@ -226,6 +226,20 @@ local function buildHouseTypeSet()
     end
 end
 
+local mapW, mapH = 0, 0     -- map size, captured when the meta is sent
+local mapTicks = 0          -- snapshots since the match started
+local fishTypes = { [53] = "fs", [69] = "fs", [455] = "fs",
+                    [456] = "fs", [457] = "fs", [458] = "fs",
+                    [450] = "f", [451] = "f" }
+local fishPoints = nil      -- camera targets for the fish sweep
+local fishIdx = 0
+local fishPendingCam = nil  -- camera moved this tick, query next tick
+local fishRows = {}         -- accumulated fish rows
+local fishActive = false
+local gaiaHistAcc = {}      -- one-shot census of the area-sweep population
+local gaiaHistSent = false
+local fishCache = nil       -- fish rows from the last area sweep
+local fishLastSweep = -1e9
 local function sendMeta()
     local players = {}
     local count = GetPlayerCount()
@@ -925,20 +939,6 @@ local scoreSig = nil
 local api8Done = false      -- one-time corner probe via raw objects
 local api10Done = false     -- one-time camera-area sweep
 local api9Sent = false      -- one-time numeric type-id sweep
-local mapW, mapH = 0, 0     -- map size, captured when the meta is sent
-local mapTicks = 0          -- snapshots since the match started
-local fishTypes = { [53] = "fs", [69] = "fs", [455] = "fs",
-                    [456] = "fs", [457] = "fs", [458] = "fs",
-                    [450] = "f", [451] = "f" }
-local fishPoints = nil      -- camera targets for the fish sweep
-local fishIdx = 0
-local fishPendingCam = nil  -- camera moved this tick, query next tick
-local fishRows = {}         -- accumulated fish rows
-local fishActive = false
-local gaiaHistAcc = {}      -- one-shot census of the area-sweep population
-local gaiaHistSent = false
-local fishCache = nil       -- fish rows from the last area sweep
-local fishLastSweep = -1e9
 local function scoreCall(pid)
     local factIdx = Fact.CURRENT_SCORE
     if scoreSig == "method" then
