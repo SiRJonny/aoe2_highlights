@@ -1394,6 +1394,9 @@ local function sample()
         if mapW > 0 then
             mapTicks = mapTicks + 1
         end
+        if mapW > 0 then
+            mapTicks = mapTicks + 1
+        end
         -- api9 (chunked): sweep all named UnitObjectType + UnitClass
         -- members, 100 per sample tick - a full sweep in one tick
         -- overruns the Update and gets killed mid-send
