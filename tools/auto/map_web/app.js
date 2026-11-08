@@ -80,6 +80,7 @@ let chips = [];           // {pid, scoreEl, ageEl}
 let barTeams = [], barMil = null, barEco = null;  // team split bars
 let bgImg = new Image();
 let bgReady = false;
+let grassColor = "#3f6c33";   // sampled map-wide grass (tree tiles)
 let playing = false;
 let t = 0;                // current game time
 let lastTs = null;
@@ -187,6 +188,36 @@ function applyTreeRow(row) {
   if (Array.isArray(row.all)) treeSet.clear();
   if (Array.isArray(row.cut))
     for (const [x, y] of row.cut) treeSet.add(x + "|" + y);
+}
+
+// the terrain keeps forest tiles painted, so a chopped tile is
+// repainted with the map's own dominant grass color (most frequent
+// 3-bit-quantized greenish pixel); no readback when blocked
+function sampleGrass() {
+  try {
+    const off = document.createElement("canvas");
+    off.width = off.height = 64;
+    const octx = off.getContext("2d", { willReadFrequently: true });
+    octx.drawImage(bgImg, 0, 0, 64, 64);
+    const d = octx.getImageData(0, 0, 64, 64).data;
+    const counts = new Map();
+    for (let i = 0; i < d.length; i += 4) {
+      const r = d[i], g = d[i + 1], b = d[i + 2], a = d[i + 3];
+      if (a < 128 || !(g > r || g > b)) continue;  // greenish only
+      const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    let best = 0, bestKey = 0;
+    for (const [k, n] of counts)
+      if (n > best) { best = n; bestKey = k; }
+    if (best) {
+      const r = ((bestKey >> 10) & 31) * 255 / 31;
+      const g = ((bestKey >> 5) & 31) * 255 / 31;
+      const b = (bestKey & 31) * 255 / 31;
+      grassColor = "rgb(" + Math.round(r) + "," + Math.round(g) +
+        "," + Math.round(b) + ")";
+    }
+  } catch { /* cross-origin or no 2d: keep the fallback color */ }
 }
 
 function draw() {
@@ -317,15 +348,15 @@ function draw() {
     treeI = ti;
   }
   if (treeSet.size) {
-    ctx.fillStyle = "#6b4423";
+    // repaint each chopped tile grass-colored (the exact tile that was
+    // under the forest is gone from the source png - the map-wide
+    // dominant grass stands in)
+    ctx.fillStyle = grassColor;
     for (const key of treeSet) {
       const c = key.indexOf("|");
       const [tx, ty] = toScreen(+key.slice(0, c) + 0.5,
                                 +key.slice(c + 1) + 0.5);
-      const rad = Math.max(1, 0.3 * tile);
-      ctx.beginPath();
-      ctx.arc(tx, ty, rad, 0, 6.2832);
-      ctx.fill();
+      ctx.fillRect(tx - tile / 2, ty - tile / 2, tile, tile);
     }
   }
 
@@ -492,7 +523,7 @@ function updateStrip() {
     }
     chip.popEl.textContent = row && Number.isFinite(row[5]) ? row[5] : "";
     chip.ageEl.innerHTML = row && row[0] >= 0 && row[0] <= 3
-      ? "<img src=\"/ages/age_" + (row[0] + 1) + ".png\" alt=\"Age " +
+      ? "<img src=\"ages/age_" + (row[0] + 1) + ".png\" alt=\"Age " +
         AGE_ROMAN[row[0]] + "\" title=\"Age " + AGE_ROMAN[row[0]] + "\">"
       : "";
     // resigned players: cross out from the chat announcement when chat
@@ -520,10 +551,6 @@ function updateStrip() {
     const total = rows.reduce((s2, c) => s2 + (c.score ?? 0), 0);
     const tEl = group.querySelector(".tscore");
     if (tEl) tEl.textContent = hasRealScore ? Math.round(total) : "";
-    const teEl = group.querySelector(".teco");
-    if (teEl) {
-      teEl.textContent = rows.reduce((s2, c) => s2 + (curEco[c.pid] || 0), 0);
-    }
   }
   const groups = [...stripEl.querySelectorAll(".tgroup")];
   groups.sort((a, b) => {
@@ -540,6 +567,8 @@ function updateStrip() {
     const split = (bar, a, b) => {
       const share = a + b > 0 ? a / (a + b) : 0.5;
       bar.l.style.width = (share * 100).toFixed(2) + "%";
+      bar.bl.textContent = a;
+      bar.br.textContent = b;
     };
     split(barMil, sum(curMil, barTeams[0]), sum(curMil, barTeams[1]));
     split(barEco, sum(curEco, barTeams[0]), sum(curEco, barTeams[1]));
@@ -567,20 +596,35 @@ function buildStrip() {
     barTeams = teamKeys;
     const box = document.createElement("div");
     box.className = "bars";
-    const mk = (title) => {
+    // fixed-width rows: 3-digit counts (max ~800 units) pinned at both
+    // ends, label over the flexing bar
+    const mk = (label) => {
+      const row = document.createElement("div");
+      row.className = "bar-row";
+      const bl = document.createElement("span");
+      bl.className = "bbl";
+      const br = document.createElement("span");
+      br.className = "bbr";
+      const wrap = document.createElement("div");
+      wrap.className = "barwrap";
+      const lab = document.createElement("div");
+      lab.className = "blabel";
+      lab.textContent = label;
       const bar = document.createElement("div");
       bar.className = "bar";
-      bar.title = title;
+      bar.title = label.split(" ")[0] + " split";
       const l = document.createElement("div");
       l.className = "lb";
       const r = document.createElement("div");
       r.className = "rb";
       bar.append(l, r);
-      box.appendChild(bar);
-      return { l, r };
+      wrap.append(lab, bar);
+      row.append(bl, wrap, br);
+      box.appendChild(row);
+      return { l, r, bl, br };
     };
-    barMil = mk("team military split");
-    barEco = mk("team eco split");
+    barMil = mk("Military");
+    barEco = mk("Economy");
     stripEl.appendChild(box);
   }
   for (const key of teamKeys) {
@@ -593,11 +637,19 @@ function buildStrip() {
       const head = document.createElement("div");
       head.className = "trow";
       head.innerHTML = "<span class='tname'></span>" +
-        "<span class='tmeta'><span class='teco'></span>" +
-        "<span class='tscore'></span></span>";
+        "<span class='tscore'></span>";
       head.querySelector(".tname").textContent =
         key === "0" ? "FFA" : "Team " + key;
       group.appendChild(head);
+      // column labels over pop and eco (dot + flex name spacer match
+      // the .prow template)
+      const heads = document.createElement("div");
+      heads.className = "thead";
+      heads.innerHTML =
+        "<span class='hdot'></span><span class='hname'></span>" +
+        "<span class='hpop'>pop</span><span class='hage'></span>" +
+        "<span class='heco'>eco</span><span class='hscore'></span>";
+      group.appendChild(heads);
     }
     const body = document.createElement("div");
     body.className = "tbody";
@@ -732,14 +784,30 @@ async function load() {
         if (!r.ok) throw new Error("bad status " + r.status);
         return r.text();
       })
-      .catch(() =>
-        fetch("data/" + tag + ".jsonl").then((r) => {
-          if (!r.ok) throw new Error("no positions for '" + tag + "'");
-          return r.text();
-        })),
+      .catch(async () => {
+        const compressed = await fetch("data/" + tag + ".jsonl.gz");
+        if (compressed.ok) {
+          const bytes = new Uint8Array(await compressed.arrayBuffer());
+          // Some static hosts transparently decompress .gz responses.
+          if (bytes[0] !== 0x1f || bytes[1] !== 0x8b)
+            return new TextDecoder().decode(bytes);
+          if (typeof DecompressionStream === "undefined")
+            throw new Error("this browser cannot decompress replay data");
+          const stream = new Blob([bytes]).stream()
+            .pipeThrough(new DecompressionStream("gzip"));
+          return new Response(stream).text();
+        }
+        const plain = await fetch("data/" + tag + ".jsonl");
+        if (!plain.ok) throw new Error("no positions for '" + tag + "'");
+        return plain.text();
+      }),
     new Promise((res) => {
       let tries = 0;
-      bgImg.onload = () => { bgReady = true; res(); };
+      bgImg.onload = () => {
+        bgReady = true;
+        sampleGrass();
+        res();
+      };
       bgImg.onerror = () => {
         // server API missing (static GitHub Pages deploy): fall back to
         // the exported map/<tag>.png
@@ -809,8 +877,6 @@ async function load() {
     }
   }
   hasResignData = Object.keys(resignedAt).length > 0;
-  document.getElementById("scorelabel").textContent =
-    hasRealScore ? "score" : "score*";
   const end = snaps[snaps.length - 1].t;
   seekEl.max = end;
   const t0 = parseFloat(new URLSearchParams(location.search).get("t"));

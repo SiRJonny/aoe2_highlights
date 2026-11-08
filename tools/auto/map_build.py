@@ -9,9 +9,10 @@ back to those static paths when /api/* fails, so the bundle works with
 no server - just point GitHub Pages (or any static host) at dist/.
 
 Usage:
-    py -3.12 tools\\auto\\map_build.py [--out dist]
+    py -3.12 tools\\auto\\map_build.py [--out dist] [--tag TAG] [--gzip]
 """
 import argparse
+import gzip
 import json
 import shutil
 from pathlib import Path
@@ -49,6 +50,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(ROOT / "dist"),
                     help="output folder (default: <repo>/dist)")
+    ap.add_argument("--tag", action="append",
+                    help="include only this replay (repeatable)")
+    ap.add_argument("--gzip", action="store_true",
+                    help="compress JSONL data for static hosting")
     args = ap.parse_args()
     dist = Path(args.out).resolve()
     dist.mkdir(parents=True, exist_ok=True)
@@ -56,14 +61,29 @@ def main():
         shutil.copy2(WEB / name, dist / name)
     shutil.copytree(WEB / "ages", dist / "ages", dirs_exist_ok=True)
 
+    candidates = [d for d in OUT.iterdir() if d.is_dir()]
+    if args.tag:
+        by_tag = {d.name: d for d in candidates}
+        missing = [tag for tag in args.tag if tag not in by_tag]
+        if missing:
+            ap.error("unknown replay tag(s): " + ", ".join(missing))
+        candidates = [by_tag[tag] for tag in dict.fromkeys(args.tag)]
+
     tags = []   # newest first (positions.jsonl mtime)
-    for d in OUT.iterdir():
+    for d in candidates:
         pos = d / "positions.jsonl"
-        if not d.is_dir() or not pos.exists() or not _has_players(pos):
+        if not pos.exists() or not _has_players(pos):
             continue
         tags.append(d.name)
         (dist / "data").mkdir(exist_ok=True)
-        shutil.copy2(pos, dist / "data" / (d.name + ".jsonl"))
+        suffix = ".jsonl.gz" if args.gzip else ".jsonl"
+        data_path = dist / "data" / (d.name + suffix)
+        if args.gzip:
+            with pos.open("rb") as source, gzip.open(
+                    data_path, "wb", compresslevel=9) as target:
+                shutil.copyfileobj(source, target)
+        else:
+            shutil.copy2(pos, data_path)
         mp = d / "map.png"
         if mp.exists():
             (dist / "map").mkdir(exist_ok=True)
@@ -72,6 +92,7 @@ def main():
               reverse=True)
     (dist / "tags.json").write_text(
         json.dumps({"tags": tags}, indent=1) + "\n", encoding="utf-8")
+    (dist / ".nojekyll").touch()
     print("dist: %d replays, %d statics -> %s" % (len(tags), len(STATICS),
                                                   dist))
 

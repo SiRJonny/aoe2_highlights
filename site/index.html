@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AoE2 map replay</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="left">
+  <select id="replay" title="pick a replay"></select>
+  <div id="mapname">loading...</div>
+  <div id="scorebar"></div>
+</div>
+<div id="main">
+  <div id="top">
+    <span id="clock">0:00</span>
+  </div>
+  <canvas id="map" width="1080" height="1080"></canvas>
+  <div id="bar">
+    <button id="play">&#9654;</button>
+    <select id="speed">
+      <option value="1">1&times;</option>
+      <option value="2">2&times;</option>
+      <option value="4">4&times;</option>
+      <option value="8" selected>8&times;</option>
+      <option value="16">16&times;</option>
+      <option value="32">32&times;</option>
+    </select>
+    <input id="seek" type="range" min="0" max="100" step="0.1" value="0">
+  </div>
+  <div id="hint">space play/pause &middot; &larr;/&rarr; &plusmn;1s &middot; ?t=SECONDS starts there &middot; d = size panel &middot; wheel zoom &middot; drag pan &middot; dblclick/R reset</div>
+</div>
+<div id="dbg">
+  <div class="dhead">sizes (tiles) <span id="dbghide" title="hide (d)">&times;</span></div>
+  <div class="drow"><label>building</label><input type="range" min="0.5" max="4" step="0.05" data-size="bld"><span class="dval"></span></div>
+  <div class="drow"><label>notable</label><input type="range" min="1" max="8" step="0.1" data-size="notable"><span class="dval"></span></div>
+  <div class="drow"><label>military</label><input type="range" min="0.2" max="2" step="0.05" data-size="unit"><span class="dval"></span></div>
+  <div class="drow"><label>villager</label><input type="range" min="0.2" max="1.5" step="0.05" data-size="vill"><span class="dval"></span></div>
+  <div class="dhead">multipliers</div>
+  <div class="drow"><label>cavalry &times;</label><input type="range" min="0.5" max="3" step="0.05" data-size="cav"><span class="dval"></span></div>
+  <div class="drow"><label>infantry &times;</label><input type="range" min="0.3" max="2" step="0.05" data-size="inf"><span class="dval"></span></div>
+  <div class="drow"><label>all units &times;</label><input type="range" min="0.3" max="3" step="0.05" data-size="dot"><span class="dval"></span></div>
+  <div class="dfoot">d = show/hide</div>
+</div>
+<script src="icons.js"></script>
+<script src="hp.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

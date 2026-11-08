@@ -1,0 +1,131 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: #101410; color: #cfd8cf;
+  font: 13px/1.4 system-ui, sans-serif;
+  display: flex; min-height: 100vh;
+}
+#left {
+  width: 340px; flex: 0 0 340px; padding: 10px 14px;
+  border-right: 1px solid #2c352c;
+  display: flex; flex-direction: column; gap: 10px;
+}
+#replay {
+  width: 100%; height: 28px; background: #233023; color: #cfd8cf;
+  border: 1px solid #3c4a3c; border-radius: 4px;
+}
+#mapname { font-weight: 600; color: #9fb49f; }
+#scorebar { display: flex; flex-direction: column; gap: 8px; }
+#scorebar .thead {
+  display: flex; align-items: baseline; gap: 6px;
+  color: #6a7a6a; font-size: 10px; text-transform: uppercase;
+  letter-spacing: .06em;
+  border-bottom: 1px solid #2c352c; padding-bottom: 2px;
+}
+/* column labels share the .prow flex template so they sit over their
+ * pop/eco columns */
+#scorebar .thead .hdot { width: 10px; flex: 0 0 auto; }
+#scorebar .thead .hname { flex: 1; }
+#scorebar .thead .hpop { min-width: 3ch; text-align: right; }
+#scorebar .thead .hage { min-width: 22px; }
+#scorebar .thead .heco { min-width: 3.5ch; text-align: right; }
+#scorebar .thead .hscore { min-width: 5.5ch; }
+#scorebar .bars { display: flex; flex-direction: column; gap: 5px; }
+#scorebar .bar-row { display: flex; align-items: flex-end; gap: 6px; }
+#scorebar .barwrap { flex: 1; display: flex; flex-direction: column;
+  gap: 2px; }
+#scorebar .blabel { color: #8aa08a; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .06em; text-align: center; }
+/* 3-digit space both sides (max possible count ~800) */
+#scorebar .bbl, #scorebar .bbr { width: 3ch; color: #fff;
+  font-variant-numeric: tabular-nums; }
+#scorebar .bbr { text-align: right; }
+/* team split bars: blue fills from the left, red from the right, the
+ * divider at the teams' share (widths set inline from updateStrip) */
+#scorebar .bar {
+  height: 13px; display: flex; overflow: hidden;
+  background: #0d130d; border: 1px solid #2c352c; border-radius: 4px;
+}
+#scorebar .bar .lb { background: #2b6ff5; }
+#scorebar .bar .rb { background: #d43a3a; flex: 1; }
+#scorebar .tgroup {
+  background: #1a221a; border: 1px solid #2c352c; border-radius: 4px;
+  padding: 4px 6px;
+}
+#scorebar .trow {
+  display: flex; justify-content: space-between; align-items: baseline;
+  border-bottom: 1px solid #2c352c; padding-bottom: 2px; margin-bottom: 3px;
+}
+#scorebar .tname { color: #8aa08a; font-size: 11px; font-weight: 700; }
+#scorebar .tmeta { display: flex; gap: 6px; align-items: baseline; }
+#scorebar .teco { color: #8aa08a; font-size: 11px; font-weight: 700;
+  min-width: 3.5ch; text-align: right; font-variant-numeric: tabular-nums; }
+#scorebar .tscore { font-weight: 700; color: #fff;
+  min-width: 5.5ch; text-align: right; font-variant-numeric: tabular-nums; }
+#scorebar .prow {
+  display: flex; align-items: baseline; gap: 6px; padding: 1px 0;
+}
+#scorebar .prow.out { opacity: .45; }
+#scorebar .prow.out .pname,
+#scorebar .prow.out .pscore { text-decoration: line-through; }
+#scorebar .pdot {
+  width: 10px; height: 10px; border-radius: 3px; display: inline-block;
+  align-self: center; border: 1px solid rgba(0,0,0,.6); flex: 0 0 auto;
+}
+#scorebar .pscore { font-weight: 700; color: #fff; min-width: 5.5ch;
+  text-align: right; font-variant-numeric: tabular-nums; }
+#scorebar .peco { color: #9fb49f; min-width: 3.5ch; text-align: right;
+  font-variant-numeric: tabular-nums; }
+#scorebar .pname { flex: 1; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+#scorebar .ppop { color: #cfd8cf; min-width: 3ch; text-align: right; }
+#scorebar .page { color: #8aa08a; min-width: 22px; text-align: center; }
+#scorebar .page img { width: 20px; height: 20px; vertical-align: middle; }
+#main {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+}
+#top {
+  width: 100%; display: flex; justify-content: center;
+  padding: 6px 14px 2px; font-weight: 600;
+}
+#clock { font-variant-numeric: tabular-nums; }
+#map {
+  width: min(88vh, 92vw, 1040px); height: min(88vh, 92vw, 1040px);
+  image-rendering: pixelated; background: #0a0f0a;
+  border: 1px solid #2c352c; border-radius: 4px;
+}
+#bar {
+  width: min(88vh, 92vw, 1040px); display: flex; gap: 8px;
+  align-items: center; padding: 8px 0;
+}
+#seek { flex: 1; }
+#play {
+  width: 34px; height: 28px; background: #233023; color: #cfd8cf;
+  border: 1px solid #3c4a3c; border-radius: 4px; cursor: pointer;
+}
+#speed {
+  background: #233023; color: #cfd8cf; border: 1px solid #3c4a3c;
+  border-radius: 4px; height: 28px;
+}
+#hint { color: #6a7a6a; padding-bottom: 8px; }
+/* right-side debug panel: live drawing-size sliders (toggle with d) */
+#dbg {
+  position: fixed; right: 10px; top: 50%; transform: translateY(-50%);
+  width: 195px; padding: 8px 10px; z-index: 5;
+  background: rgba(16, 22, 16, .92); border: 1px solid #2c352c;
+  border-radius: 4px; display: flex; flex-direction: column; gap: 5px;
+}
+#dbg.off { display: none; }
+#dbg .dhead {
+  color: #8aa08a; font-size: 11px; font-weight: 700; margin-top: 2px;
+  display: flex; justify-content: space-between; align-items: baseline;
+}
+#dbghide { cursor: pointer; color: #6a7a6a; padding: 0 3px; }
+#dbghide:hover { color: #fff; }
+#dbg .drow { display: flex; align-items: center; gap: 6px; }
+#dbg .drow label { width: 74px; color: #9fb49f; font-size: 11px;
+  white-space: nowrap; }
+#dbg .drow input[type=range] { flex: 1; height: 14px; }
+#dbg .dval { width: 4ch; text-align: right; color: #fff;
+  font-variant-numeric: tabular-nums; font-size: 11px; }
+#dbg .dfoot { color: #6a7a6a; font-size: 10px; }

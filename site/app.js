@@ -1,0 +1,920 @@
+/* AoE2 map replay: canvas minimap animation over collected object
+ * snapshots. Data (per game-second, columnar [id, owner, unitType, x, y]):
+ *   meta    {mapWidth, mapHeight, players:[{id,name}], typeNames}
+ *   objects {b: buildings, v: villagers, m: military}
+ *   stats   {stats: [[age,food,wood,stone,gold,pop,score?], ...]} per player
+ *   names   {names: {pid: {name, colorId}}} from the replay header
+ *
+ * Orientation: the world is rotated 45 degrees like the in-game minimap,
+ * then turned 90 deg to the left (world (0,0) at the left corner).
+ * Buildings are squares (notable ones larger with an icon glyph inside —
+ * ?icons= switches between square/glyph/emoji/vector/game sets), units
+ * are dots, all in each player's exact in-game color (spritecolors.json
+ * TeamColors, addressed by the mgz color_id from the replay header).
+ */
+"use strict";
+
+const QS = new URLSearchParams(location.search);
+const tag = QS.get("tag") || "demo";
+const iconSet = QS.get("icons") || "vector";
+// EXACT DE team colors, from the game's own
+// resources/_common/palettes/spritecolors.json ("TeamColors", 0-1 floats
+// x255): blue red green yellow teal purple gray orange.
+const COLOR_ID_HEX = [
+  "#0000FF", "#FF0000", "#00A91B", "#D6D61B",
+  "#7BEFF0", "#8A13F7", "#666666", "#FF9205",
+];
+// slot fallback when the replay header is unavailable (classic cycle:
+// blue red yellow green cyan purple gray orange)
+const SLOT_HEX = [
+  null,
+  COLOR_ID_HEX[0], COLOR_ID_HEX[1], COLOR_ID_HEX[3], COLOR_ID_HEX[2],
+  COLOR_ID_HEX[4], COLOR_ID_HEX[5], COLOR_ID_HEX[6], COLOR_ID_HEX[7],
+];
+const GAIA = "#9ab09a";
+const NOTABLE = [
+  ["TOWN_CENTER", "town_center"],
+  ["CASTLE", "castle"],
+  ["KREPOST", "krepost"],
+  ["DONJON", "donjon"],
+  ["FORTIFIED_CHURCH", "fortified_church"],
+  ["FEITORIA", "feitoria"],
+  ["WATCH_TOWER", "tower"],
+  ["GUARD_TOWER", "tower"],
+  ["KEEP", "tower"],
+  ["BOMBARD_TOWER", "tower"],
+];
+// draw order: plain buildings under, notable icons above them, villagers
+// next, military on top (sizes in world tiles)
+function qnum(k, d) {
+  const v = parseFloat(QS.get(k));
+  return v > 0 ? v : d;
+}
+const SIZES = {
+  bld: qnum("bld", 1.3),        // plain building square
+  notable: qnum("notable", 5),  // notable building (icon) square
+  unit: qnum("unit", 0.75),     // military dot
+  vill: qnum("vil", 0.5),       // villager dot
+  cav: qnum("cav", 3),          // cavalry multiplier (default = slider max)
+  inf: qnum("inf", 2),          // infantry multiplier (default = slider max)
+  dot: qnum("dot", 1),          // extra multiplier on every unit dot
+};
+const AGE_ROMAN = ["I", "II", "III", "IV"];
+
+const canvas = document.getElementById("map");
+const ctx = canvas.getContext("2d");
+const playBtn = document.getElementById("play");
+const seekEl = document.getElementById("seek");
+const speedEl = document.getElementById("speed");
+const clockEl = document.getElementById("clock");
+const stripEl = document.getElementById("scorebar");
+
+let meta = null;          // latest meta row
+let snaps = [];           // [{t, b, v, m, eco}]
+let statRows = [];        // [{t, stats}] (stats[i] = player i)
+let scoreRows = [];       // [{t, scores}] real score per player (API)
+let chatRows = [];        // [{t, msgs}] chat capture (resign messages)
+let consNow = new Set();  // building ids currently under construction
+let playerInfo = {};      // pid -> {name, colorId, team}
+let chips = [];           // {pid, scoreEl, ageEl}
+let barTeams = [], barMil = null, barEco = null;  // team split bars
+let bgImg = new Image();
+let bgReady = false;
+let grassColor = "#3f6c33";   // sampled map-wide grass (tree tiles)
+let playing = false;
+let t = 0;                // current game time
+let lastTs = null;
+// id -> row index maps for the two frames around the cursor (rebuilt on
+// frame change only — 1500 lookups/frame instead of 1500 inserts/frame)
+let idxA = null, idxB = null, idxI = -1;
+let bPlain = null, bNotable = null;   // buildings split for draw order
+let curEco = {};          // eco count (villagers + fishers + traders)
+let curMil = {};          // military units on the board per player
+let fishSpots = [];       // one-time fish layer from the raw buffer
+let resRows = [];         // gold/stone pile lists from the raw buffer
+let resI = -1;
+let treeRows = [];        // full tree list once, then cut deltas
+let treeI = -1;
+const treeSet = new Set(); // "x|y" -> forest tile still has a tree
+let scoresI = -1, curScores = null;   // real score rows, aligned to t
+let hasRealScore = false; // score rows exist (else eco count is shown)
+let dataHasHp = false;    // snapshot building rows carry hp (new data)
+let prevHp = null;        // id -> hp last snapshot (unfinished = rising)
+let hpRising = null;      // ids whose hp rose since the last snapshot
+let lastHpT = -1e9;       // game time of the prevHp snapshot
+let curCons = null;       // construction-id set at the current snapshot
+let resignedAt = null;    // pid -> game time of the resign chat message
+let hasResignData = false;
+let statsI = -1;
+
+function fmtTime(s) {
+  const m = Math.floor(s / 60), ss = Math.floor(s % 60);
+  return m + ":" + String(ss).padStart(2, "0");
+}
+
+function colorOf(pid) {
+  const info = playerInfo[pid];
+  if (info && Number.isInteger(info.colorId) &&
+      COLOR_ID_HEX[info.colorId] !== undefined)
+    return COLOR_ID_HEX[info.colorId];
+  return SLOT_HEX[pid] || GAIA;
+}
+
+const civAbbr = (c) =>
+  (c || "").replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase();
+
+function idIndex(snap, layer) {
+  const m = new Map();
+  // an empty Lua layer arrives as {} (truthy, not an array)
+  const rows = Array.isArray(snap[layer]) ? snap[layer] : [];
+  for (let i = 0; i < rows.length; i++) m.set(rows[i][0], rows[i]);
+  return m;
+}
+
+function interp(from, to, id, f) {
+  const a = from ? from.get(id) : null;
+  const b = to ? to.get(id) : null;
+  if (a && b) return [a[3] + (b[3] - a[3]) * f, a[4] + (b[4] - a[4]) * f, a];
+  if (a) return [a[3], a[4], a];
+  if (b) return [b[3], b[4], b];
+  return null;
+}
+
+function notableKindFor(typeName) {
+  const n = meta.typeNames[typeName] || "";
+  for (const [prefix, kind] of NOTABLE)
+    if (n.startsWith(prefix)) return kind;
+  return null;
+}
+
+/* DE town centers are composites: the main building plus 3 annex wings,
+ * each a separate object one tile off the TC. All four names start with
+ * TOWN_CENTER, so drawing every notable stacks 4 icons on one TC. Drop
+ * the annexes and collapse same-owner same-kind notables within a small
+ * radius (completion re-ids the object, foundation row lingers) keeping
+ * the older id. Radius 3 tiles for footprint buildings, 1.5 for 1x1
+ * towers; legit same-kind notables sit farther apart. */
+function pruneBuildings(rows) {
+  if (!Array.isArray(rows)) return [];
+  const out = [];
+  for (const r of rows) {
+    const name = meta.typeNames[r[2]] || "";
+    if (name.includes("_ANNEX")) continue;
+    const kind = notableKindFor(r[2]);
+    if (kind) {
+      const rad = kind === "tower" ? 1.5 : 3;
+      let twin = null;
+      for (const q of out) {
+        if (q[1] === r[1] && notableKindFor(q[2]) === kind
+            && Math.abs(q[3] - r[3]) <= rad
+            && Math.abs(q[4] - r[4]) <= rad) {
+          twin = q;
+          break;
+        }
+      }
+      if (twin) {
+        if (r[0] < twin[0]) out[out.indexOf(twin)] = r;
+        continue;
+      }
+    }
+    out.push(r);
+  }
+  return out;
+}
+
+// advance the tree layer: 'all' is the fresh snapshot (no cuts yet),
+// 'cut' adds the tiles chopped away since the last refresh
+function applyTreeRow(row) {
+  if (Array.isArray(row.all)) treeSet.clear();
+  if (Array.isArray(row.cut))
+    for (const [x, y] of row.cut) treeSet.add(x + "|" + y);
+}
+
+// the terrain keeps forest tiles painted, so a chopped tile is
+// repainted with the map's own dominant grass color (most frequent
+// 3-bit-quantized greenish pixel); no readback when blocked
+function sampleGrass() {
+  try {
+    const off = document.createElement("canvas");
+    off.width = off.height = 64;
+    const octx = off.getContext("2d", { willReadFrequently: true });
+    octx.drawImage(bgImg, 0, 0, 64, 64);
+    const d = octx.getImageData(0, 0, 64, 64).data;
+    const counts = new Map();
+    for (let i = 0; i < d.length; i += 4) {
+      const r = d[i], g = d[i + 1], b = d[i + 2], a = d[i + 3];
+      if (a < 128 || !(g > r || g > b)) continue;  // greenish only
+      const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    let best = 0, bestKey = 0;
+    for (const [k, n] of counts)
+      if (n > best) { best = n; bestKey = k; }
+    if (best) {
+      const r = ((bestKey >> 10) & 31) * 255 / 31;
+      const g = ((bestKey >> 5) & 31) * 255 / 31;
+      const b = (bestKey & 31) * 255 / 31;
+      grassColor = "rgb(" + Math.round(r) + "," + Math.round(g) +
+        "," + Math.round(b) + ")";
+    }
+  } catch { /* cross-origin or no 2d: keep the fallback color */ }
+}
+
+function draw() {
+  if (!snaps.length) return;
+  const w = canvas.width;
+  const D = meta.mapWidth;
+  const s2 = w / (2 * D);          // diagonal fit: diamond fills the square
+  const tile = w / D;              // world-tile screen size (for markers)
+  // locate the two samples around t
+  let i = 0;
+  while (i + 1 < snaps.length && snaps[i + 1].t <= t) i++;
+  const s0 = snaps[i];
+  const s1 = snaps[Math.min(i + 1, snaps.length - 1)];
+  const span = s1.t > s0.t ? s1.t - s0.t : 1;
+  const f = Math.max(0, Math.min(1, (t - s0.t) / span));
+  if (idxI !== i || !idxA) {
+    idxA = { b: idIndex(s0, "b"), m: idIndex(s0, "m"), v: idIndex(s0, "v") };
+    idxB = { b: idIndex(s1, "b"), m: idIndex(s1, "m"), v: idIndex(s1, "v") };
+    const milCount = {};
+    for (const row of s0.m || [])
+      milCount[row[1]] = (milCount[row[1]] || 0) + 1;
+    curMil = milCount;
+    const bDed = pruneBuildings(s0.b);
+    bNotable = bDed.filter((r) => notableKindFor(r[2]));
+    bPlain = bDed.filter((r) => !notableKindFor(r[2]));
+    curEco = s0.eco || {};
+    curCons = s0.cons || null;
+    // unfinished buildings: their hp is RISING (construction); damage
+    // lowers hp, completed buildings hold steady — no max-hp table
+    // needed (upgrades shift real maxima)
+    if (dataHasHp) {
+      const cont = t - lastHpT <= 5 && prevHp;
+      hpRising = new Set();
+      const next = cont ? new Map(prevHp) : new Map();
+      for (const r of s0.b || []) {
+        if (r.length < 6 || typeof r[5] !== "number") continue;
+        const old = cont ? prevHp.get(r[0]) : undefined;
+        if (old !== undefined && r[5] > old + 0.5) hpRising.add(r[0]);
+        next.set(r[0], r[5]);
+      }
+      prevHp = next;
+      lastHpT = t;
+    }
+    idxI = i;
+  }
+
+  // terrain: rotate the square map image 45 deg + fit so the world
+  // diamond touches the canvas edge midpoints, then 90 deg to the left
+  // (world (0,0) corner at the LEFT, (D,0) top, (0,D) bottom, (D,D)
+  // right). Matrix = rotate 45 + scale 1/sqrt2 + quarter turn, composed
+  // onto the pan/zoom view transform.
+  // clear in device space: the rotated diamond only covers part of the
+  // canvas, so pan/zoom would leave stale pixels in the exposed corners
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#0a0f0a";
+  ctx.fillRect(0, 0, w, canvas.height);
+  ctx.imageSmoothingEnabled = false;
+  ctx.setTransform(view.z, 0, 0, view.z, view.x, view.y);
+  ctx.save();
+  ctx.transform(0.5, -0.5, 0.5, 0.5, 0, w / 2);
+  if (bgReady) ctx.drawImage(bgImg, 0, 0, w, w);
+  else { ctx.fillStyle = "#2d542d"; ctx.fillRect(0, 0, w, w); }
+  ctx.restore();
+  ctx.setTransform(view.z, 0, 0, view.z, view.x, view.y);
+
+  const toScreen = (x, y) => [(x + y) * s2, (D - x + y) * s2];
+
+  // static fish layer: fish are DEAD_OR_FISH to the engine (alive=0,
+  // invisible to every object query) - the collector reads them once
+  // per match from the GetObjectsPtr raw buffer; buffer coords are
+  // tile corners, units plot at tile centers -> +0.5 on both axes;
+  // shore fish/turtles = pale dot, deep schools/dolphins = fish icon,
+  // whales (id unknown yet, none seen) = gold, bigger
+  const WHALES = new Set();
+  for (const fp of fishSpots) {
+    const [fx, fy] = toScreen(fp[0] + 0.5, fp[1] + 0.5);
+    if (!(fp[2] === 53 || fp[2] === 69 || fp[2] === 1141 || WHALES.has(fp[2]))) {
+      ctx.save();
+      ctx.translate(fx, fy);
+      ctx.scale(tile * (WHALES.has(fp[2]) ? 0.26 : 0.15), tile * (WHALES.has(fp[2]) ? 0.26 : 0.15));
+      ctx.translate(-12, -12);
+      ctx.fillStyle = WHALES.has(fp[2]) ? "#ffd75e" : "#ffffff";
+      FISH_SHAPE(ctx);
+      ctx.restore();
+      continue;
+    }
+    ctx.fillStyle = "#f5f5f5";
+    const r = Math.max(1, 0.45 * tile);
+    ctx.beginPath();
+    ctx.arc(fx, fy, r, 0, 6.2832);
+    ctx.fill();
+  }
+
+  // gold/stone mines: alive gaia objects read from the same raw buffer
+  // as the fish; sparse re-reads drop a pile once fully harvested
+  while (resI + 1 < resRows.length && resRows[resI + 1].t <= t) resI++;
+  const resNow = resI >= 0 ? resRows[resI] : null;
+  if (resNow) {
+    for (const [spots, fill] of [[resNow.g, "#ffd75e"],
+                                 [resNow.s, "#c2ccf0"]]) {
+      for (const rp of spots) {
+        const [rx, ry] = toScreen(rp[0] + 0.5, rp[1] + 0.5);
+        ctx.fillStyle = fill;
+        ctx.save();
+        ctx.translate(rx, ry);
+        ctx.rotate(Math.PI / 4);
+        const half = 0.42 * tile;
+        ctx.fillRect(-half, -half, half * 2, half * 2);
+        ctx.restore();
+      }
+    }
+  }
+
+  // tree depletion: the raw buffer keeps a tile only while the tree is
+  // there - the collector sends the full alive list once, then only the
+  // spots removed per refresh; a small stump dot marks each chopped
+  // tile (the terrain keeps the forest painted under it)
+  let ti = (treeI >= 0 && treeRows[treeI] && treeRows[treeI].t <= t)
+    ? treeI : -1;
+  while (ti + 1 < treeRows.length && treeRows[ti + 1].t <= t) ti++;
+  if (ti !== treeI) {
+    if (ti > treeI && treeI >= 0) {
+      for (let k = treeI + 1; k <= ti; k++) applyTreeRow(treeRows[k]);
+    } else {
+      treeSet.clear();
+      for (let k = 0; k <= ti; k++) applyTreeRow(treeRows[k]);
+    }
+    treeI = ti;
+  }
+  if (treeSet.size) {
+    // repaint each chopped tile grass-colored (the exact tile that was
+    // under the forest is gone from the source png - the map-wide
+    // dominant grass stands in)
+    ctx.fillStyle = grassColor;
+    for (const key of treeSet) {
+      const c = key.indexOf("|");
+      const [tx, ty] = toScreen(+key.slice(0, c) + 0.5,
+                                +key.slice(c + 1) + 0.5);
+      ctx.fillRect(tx - tile / 2, ty - tile / 2, tile, tile);
+    }
+  }
+
+  const layer = (rowsIn, from, to, sizeKey, circular) => {
+    const rows = Array.isArray(rowsIn) ? rowsIn : [];
+    for (const row of rows) {
+      const p = interp(from, to, row[0], f);
+      if (!p) continue;
+      const [x, y] = toScreen(p[0], p[1]);
+      const color = colorOf(row[1]);
+      const kind = circular ? null : notableKindFor(row[2]);
+      let size = (kind ? SIZES.notable : SIZES[sizeKey]) * tile;
+      if (circular) {
+        // tags from the Lua side: i infantry, c cavalry, s warship,
+        // a gaia animal, f big fish, fs small fish
+        const tag5 = p[2] && p[2][5];
+        const mult = tag5 === "c" ? SIZES.cav
+                   : tag5 === "i" ? SIZES.inf : 1;
+        size *= mult * SIZES.dot;
+        if (tag5 === "a" || tag5 === "fs") {
+          // gaia animal: small olive dot; small fish: white dot
+          ctx.fillStyle = tag5 === "a" ? "#808000" : "#f5f5f5";
+          ctx.beginPath();
+          ctx.arc(x, y, Math.max(1.3, size * 0.45), 0, 6.2832);
+          ctx.fill();
+          continue;
+        }
+        if (tag5 === "f") {
+          // deep-sea fish: white fish icon
+          ctx.save();
+          ctx.translate(x, y);
+          const box = size * 2.8;
+          ctx.scale(box / 24, box / 24);
+          ctx.translate(-12, -12);
+          ctx.fillStyle = "#ffffff";
+          FISH_SHAPE(ctx);
+          ctx.restore();
+          continue;
+        }
+        if (tag5 === "c" || tag5 === "i" || tag5 === "s") {
+          // silhouette marker; ships get a much larger box (they read
+          // poorly at dot size), the box may exceed the dot footprint
+          ctx.save();
+          ctx.translate(x, y);
+          const box = size * (tag5 === "s" ? 4.6 : 2.2);
+          ctx.scale(box / 24, box / 24);
+          ctx.translate(-12, -12);
+          ctx.lineWidth = 2; ctx.lineJoin = "round";
+          if (tag5 === "c") CAVALRY_SHAPE(ctx, color);
+          else if (tag5 === "i") SOLDIER_SHAPE(ctx, color);
+          else SHIP_SHAPE(ctx, color);
+          ctx.restore();
+          continue;
+        }
+        const r = size / 2;
+        ctx.fillStyle = color;
+        ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(1.1, r), 0, 6.2832);
+        ctx.fill();
+        ctx.stroke();
+        continue;
+      }
+      drawBuilding(kind, x, y, size, color,
+        hpRising && hpRising.has(row[0]));
+    }
+  };
+  layer(bPlain, idxA.b, idxB.b, "bld", false);
+  layer(bNotable, idxA.b, idxB.b, "notable", false);
+  layer(s0.v, idxA.v, idxB.v, "vill", true);
+  layer(s0.m, idxA.m, idxB.m, "unit", true);
+
+  updateStrip();
+  clockEl.textContent = fmtTime(t);
+}
+
+/* Buildings: dispatch to the selected icon set. Glyph/emoji draw a player-
+ * colored square with the glyph on top; vector replaces the square with a
+ * painted silhouette. Any kind a set does not cover falls back to the
+ * glyph square. Buildings under construction (hp rising between
+ * snapshots) render translucent. */
+function drawBuilding(kind, x, y, size, color, rising) {
+  const r = size / 2;
+  if (rising) ctx.globalAlpha = 0.45;
+  ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
+  ctx.fillStyle = color;
+  const vec = kind && ICON_SETS.vector[kind];
+  if (vec) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(size / 24, size / 24);
+    ctx.translate(-12, -12);       // painters draw in a 24x24 box
+    ctx.lineWidth = 2; ctx.lineJoin = "round";
+    vec(ctx);
+    ctx.restore();
+  } else {
+    ctx.fillRect(x - r, y - r, size, size);
+    ctx.strokeRect(x - r, y - r, size, size);
+    const glyph = kind ? ICON_SETS[iconSet][kind] : null;
+    if (glyph) {
+      ctx.font = Math.round(size * (iconSet === "emoji" ? 0.72 : 0.85)) +
+        "px serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillStyle = "#fff";
+      ctx.fillText(glyph, x, y + size * 0.04);
+      ctx.strokeText(glyph, x, y + size * 0.04);
+    }
+  }
+  if (rising) ctx.globalAlpha = 1;
+}
+
+// resigned heuristic: a player's score freezes the moment they leave —
+// nothing gathers, kills or builds any more. 120 flat game-seconds
+// marks them out. (The PLAYER_IN_GAME fact proved unreliable: winners
+// read 0 at game end.)
+const RESIGN_AFTER_S = 120;
+function outFor(pid) {
+  if (scoresI < 0) return false;
+  const arr = scoreRows;
+  const cur = arr[scoresI].scores[pid - 1];
+  if (cur === undefined) return false;
+  let i = scoresI;
+  while (i > 0 && arr[i].scores[pid - 1] === cur) i--;
+  const changeT = arr[i].scores[pid - 1] === cur
+    ? arr[0].t : arr[i + 1].t;
+  return t - changeT >= RESIGN_AFTER_S;
+}
+
+// in-game-style left panel: teams sorted by total score (descending),
+// players sorted within their team, each row score + color + name +
+// pop + age. Score = the game's own Fact.CURRENT_SCORE per player when
+// the API exposes it (auto-detected signature), otherwise the exact eco
+// count (villagers + fishing ships + trade units) — no approximation.
+function updateStrip() {
+  // cursors rebase when seeking backwards so scores/pop/age track t
+  let i = (statsI >= 0 && statRows[statsI] && statRows[statsI].t <= t)
+    ? statsI : -1;
+  while (i + 1 < statRows.length && statRows[i + 1].t <= t) i++;
+  if (i === statsI) return;
+  statsI = i;
+  if (i < 0) return;
+  let si = (scoresI >= 0 && scoreRows[scoresI] && scoreRows[scoresI].t <= t)
+    ? scoresI : -1;
+  while (si + 1 < scoreRows.length && scoreRows[si + 1].t <= t) si++;
+  scoresI = si;
+  curScores = si >= 0 ? scoreRows[si] : null;
+  const stats = statRows[i].stats;
+  for (const chip of chips) {
+    const row = Array.isArray(stats) ? stats[chip.pid] : null;
+    // scores JSON arrays are 0-based but pid is 1-based
+    const sc = curScores ? curScores.scores[chip.pid - 1] : undefined;
+    const eco = curEco[chip.pid];
+    if (!hasRealScore) {
+      // API score unavailable: the eco count IS the number shown
+      chip.scoreEl.textContent = "";
+      chip.ecoEl.textContent = eco === undefined ? "" : eco;
+      chip.score = eco === undefined ? null : eco;
+    } else {
+      const val = (sc !== undefined && sc !== null) ? sc
+        : (eco === undefined ? null : eco);
+      chip.scoreEl.textContent = val === null ? "" : val;
+      chip.ecoEl.textContent = eco === undefined ? "" : eco;
+      chip.score = val;
+    }
+    chip.popEl.textContent = row && Number.isFinite(row[5]) ? row[5] : "";
+    chip.ageEl.innerHTML = row && row[0] >= 0 && row[0] <= 3
+      ? "<img src=\"ages/age_" + (row[0] + 1) + ".png\" alt=\"Age " +
+        AGE_ROMAN[row[0]] + "\" title=\"Age " + AGE_ROMAN[row[0]] + "\">"
+      : "";
+    // resigned players: cross out from the chat announcement when chat
+    // was captured; fall back to the score-flatline heuristic otherwise
+    const out = hasResignData
+      ? (resignedAt[chip.pid] !== undefined && t >= resignedAt[chip.pid])
+      : outFor(chip.pid);
+    if (chip.out !== out) {
+      chip.out = out;
+      chip.rowEl.classList.toggle("out", out);
+    }
+  }
+  // re-order rows: teams by total score desc, players by score desc
+  const teams = {};
+  for (const chip of chips) {
+    const key = chip.team || 0;
+    (teams[key] = teams[key] || []).push(chip);
+  }
+  for (const group of stripEl.querySelectorAll(".tgroup")) {
+    const key = group.dataset.team;
+    const rows = teams[key] || [];
+    rows.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+    const body = group.querySelector(".tbody");
+    for (const c of rows) body.appendChild(c.rowEl);
+    const total = rows.reduce((s2, c) => s2 + (c.score ?? 0), 0);
+    const tEl = group.querySelector(".tscore");
+    if (tEl) tEl.textContent = hasRealScore ? Math.round(total) : "";
+  }
+  const groups = [...stripEl.querySelectorAll(".tgroup")];
+  groups.sort((a, b) => {
+    const sum = (k) => (teams[k] || [])
+      .reduce((s2, c) => s2 + (c.score ?? 0), 0);
+    return sum(b.dataset.team) - sum(a.dataset.team);
+  });
+  for (const g of groups) stripEl.appendChild(g);
+  // update the split bars (team 1 left, team 2 right) from the counts
+  // at this sample: military units on the board and the eco count
+  if (barMil && barTeams.length === 2) {
+    const sum = (table, key) => (teams[key] || [])
+      .reduce((s2, c) => s2 + (table[c.pid] || 0), 0);
+    const split = (bar, a, b) => {
+      const share = a + b > 0 ? a / (a + b) : 0.5;
+      bar.l.style.width = (share * 100).toFixed(2) + "%";
+      bar.bl.textContent = a;
+      bar.br.textContent = b;
+    };
+    split(barMil, sum(curMil, barTeams[0]), sum(curMil, barTeams[1]));
+    split(barEco, sum(curEco, barTeams[0]), sum(curEco, barTeams[1]));
+  }
+}
+
+function buildStrip() {
+  stripEl.innerHTML = "";
+  chips = [];
+  const teams = {};
+  for (const p of meta.players) {
+    if (p.id < 1 || p.id > 8) continue;
+    const info = playerInfo[p.id] || {};
+    const team = info.team || 0;
+    teams[team] = teams[team] || [];
+    teams[team].push(p.id);
+  }
+  const teamKeys = Object.keys(teams).sort((a, b) => +a - +b);
+  // team strength bars above the team panels: military on top, eco
+  // below; team 1 fills from the left, team 2 from the right, the
+  // divider sits at the teams' share of the total counts
+  barTeams = [];
+  barMil = barEco = null;
+  if (teamKeys.length === 2) {
+    barTeams = teamKeys;
+    const box = document.createElement("div");
+    box.className = "bars";
+    // fixed-width rows: 3-digit counts (max ~800 units) pinned at both
+    // ends, label over the flexing bar
+    const mk = (label) => {
+      const row = document.createElement("div");
+      row.className = "bar-row";
+      const bl = document.createElement("span");
+      bl.className = "bbl";
+      const br = document.createElement("span");
+      br.className = "bbr";
+      const wrap = document.createElement("div");
+      wrap.className = "barwrap";
+      const lab = document.createElement("div");
+      lab.className = "blabel";
+      lab.textContent = label;
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      bar.title = label.split(" ")[0] + " split";
+      const l = document.createElement("div");
+      l.className = "lb";
+      const r = document.createElement("div");
+      r.className = "rb";
+      bar.append(l, r);
+      wrap.append(lab, bar);
+      row.append(bl, wrap, br);
+      box.appendChild(row);
+      return { l, r, bl, br };
+    };
+    barMil = mk("Military");
+    barEco = mk("Economy");
+    stripEl.appendChild(box);
+  }
+  for (const key of teamKeys) {
+    const group = document.createElement("div");
+    group.className = "tgroup";
+    group.dataset.team = key;
+    const members = teams[key];
+    const showHeader = teamKeys.length > 1 || key !== "0";
+    if (showHeader) {
+      const head = document.createElement("div");
+      head.className = "trow";
+      head.innerHTML = "<span class='tname'></span>" +
+        "<span class='tscore'></span>";
+      head.querySelector(".tname").textContent =
+        key === "0" ? "FFA" : "Team " + key;
+      group.appendChild(head);
+      // column labels over pop and eco (dot + flex name spacer match
+      // the .prow template)
+      const heads = document.createElement("div");
+      heads.className = "thead";
+      heads.innerHTML =
+        "<span class='hdot'></span><span class='hname'></span>" +
+        "<span class='hpop'>pop</span><span class='hage'></span>" +
+        "<span class='heco'>eco</span><span class='hscore'></span>";
+      group.appendChild(heads);
+    }
+    const body = document.createElement("div");
+    body.className = "tbody";
+    group.appendChild(body);
+    for (const pid of members) {
+      const info = playerInfo[pid] || {};
+      const rowEl = document.createElement("div");
+      rowEl.className = "prow";
+      rowEl.innerHTML = "<span class='pdot' style='background:" +
+        colorOf(pid) + "'></span><span class='pname'></span>" +
+        "<span class='ppop'></span><span class='page'></span>" +
+        "<span class='peco'></span><span class='pscore'></span>";
+      const abbr = civAbbr(info.civ);
+      rowEl.querySelector(".pname").textContent =
+        (abbr ? "[" + abbr + "] " : "") + (info.name || ("P" + pid));
+      body.appendChild(rowEl);
+      chips.push({ pid, team: +key, score: null, out: false, rowEl,
+                   scoreEl: rowEl.querySelector(".pscore"),
+                   ecoEl: rowEl.querySelector(".peco"),
+                   popEl: rowEl.querySelector(".ppop"),
+                   ageEl: rowEl.querySelector(".page") });
+    }
+    stripEl.appendChild(group);
+  }
+  statsI = -1;
+}
+
+function loop(ts) {
+  if (playing) {
+    if (lastTs !== null) {
+      t += (ts - lastTs) / 1000 * parseFloat(speedEl.value);
+      const end = snaps[snaps.length - 1].t;
+      if (t >= end) { t = end; setPlaying(false); }
+    }
+    seekEl.value = t;
+  }
+  lastTs = ts;
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function setPlaying(on) {
+  playing = on;
+  playBtn.innerHTML = on ? "&#10074;&#10074;" : "&#9654;";
+}
+
+// debug size panel: sliders write straight into SIZES; the RAF loop
+// redraws every frame, so changes show immediately (even while paused)
+const dbgEl = document.getElementById("dbg");
+if (dbgEl) {
+  for (const input of dbgEl.querySelectorAll("input[type=range]")) {
+    const key = input.dataset.size;
+    input.value = SIZES[key];
+    const out = input.closest(".drow").querySelector(".dval");
+    out.textContent = SIZES[key];
+    input.oninput = () => {
+      const v = parseFloat(input.value);
+      if (v > 0) SIZES[key] = v;
+      out.textContent = v;
+    };
+  }
+  document.getElementById("dbghide").onclick = toggleDbg;
+}
+function toggleDbg() { if (dbgEl) dbgEl.classList.toggle("off"); }
+
+playBtn.onclick = () => {
+  if (!playing && t >= snaps[snaps.length - 1].t) t = 0;
+  setPlaying(!playing);
+};
+seekEl.oninput = () => { t = parseFloat(seekEl.value); };
+document.addEventListener("keydown", (e) => {
+  if (e.code === "Space") { e.preventDefault(); playBtn.onclick(); }
+  else if (e.code === "KeyD") toggleDbg();
+  else if (e.code === "KeyR") { view = { x: 0, y: 0, z: 1 }; }
+  else if (e.code === "ArrowRight") t = Math.min(t + 1, snaps.at(-1).t);
+  else if (e.code === "ArrowLeft") t = Math.max(0, t - 1);
+});
+
+// pan/zoom on the map: wheel zooms toward the cursor, left-drag pans,
+// double-click or R resets
+let view = { x: 0, y: 0, z: 1 };
+function clampView() {
+  view.z = Math.max(1, Math.min(8, view.z));
+  if (view.z === 1) { view.x = 0; view.y = 0; return; }
+  const s = canvas.width * view.z;
+  view.x = Math.max(canvas.width - s, Math.min(0, view.x));
+  view.y = Math.max(canvas.width - s, Math.min(0, view.y));
+}
+function evPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const k = canvas.width / rect.width;
+  return { x: (e.clientX - rect.left) * k, y: (e.clientY - rect.top) * k };
+}
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const p = evPos(e);
+  const old = view.z;
+  const z = Math.max(1, Math.min(8, view.z * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+  view.x = p.x - (p.x - view.x) * (z / old);
+  view.y = p.y - (p.y - view.y) * (z / old);
+  view.z = z;
+  clampView();
+}, { passive: false });
+let drag = null;
+canvas.addEventListener("mousedown", (e) => {
+  if (e.button === 0) {
+    drag = { x: e.clientX, y: e.clientY };
+    canvas.style.cursor = "grabbing";
+  }
+});
+window.addEventListener("mousemove", (e) => {
+  if (!drag) return;
+  const rect = canvas.getBoundingClientRect();
+  const k = canvas.width / rect.width;
+  view.x += (e.clientX - drag.x) * k;
+  view.y += (e.clientY - drag.y) * k;
+  drag = { x: e.clientX, y: e.clientY };
+  clampView();
+});
+window.addEventListener("mouseup", () => {
+  drag = null;
+  canvas.style.cursor = "grab";
+});
+canvas.addEventListener("dblclick", () => { view = { x: 0, y: 0, z: 1 }; });
+
+async function load() {
+  document.getElementById("mapname").textContent = "loading " + tag + " ...";
+  // data: server API first, static export fallback for GitHub Pages
+  const [txt] = await Promise.all([
+    fetch("/api/data/" + tag)
+      .then((r) => {
+        if (!r.ok) throw new Error("bad status " + r.status);
+        return r.text();
+      })
+      .catch(async () => {
+        const compressed = await fetch("data/" + tag + ".jsonl.gz");
+        if (compressed.ok) {
+          const bytes = new Uint8Array(await compressed.arrayBuffer());
+          // Some static hosts transparently decompress .gz responses.
+          if (bytes[0] !== 0x1f || bytes[1] !== 0x8b)
+            return new TextDecoder().decode(bytes);
+          if (typeof DecompressionStream === "undefined")
+            throw new Error("this browser cannot decompress replay data");
+          const stream = new Blob([bytes]).stream()
+            .pipeThrough(new DecompressionStream("gzip"));
+          return new Response(stream).text();
+        }
+        const plain = await fetch("data/" + tag + ".jsonl");
+        if (!plain.ok) throw new Error("no positions for '" + tag + "'");
+        return plain.text();
+      }),
+    new Promise((res) => {
+      let tries = 0;
+      bgImg.onload = () => {
+        bgReady = true;
+        sampleGrass();
+        res();
+      };
+      bgImg.onerror = () => {
+        // server API missing (static GitHub Pages deploy): fall back to
+        // the exported map/<tag>.png
+        tries += 1;
+        if (tries === 1) bgImg.src = "map/" + tag + ".png";
+        else res();
+      };
+      bgImg.src = "/api/map/" + tag;
+    }),
+  ]);
+  let lastMeta = null, mapName = null;
+  for (const line of txt.split("\n")) {
+    if (!line.trim()) continue;
+    const r = JSON.parse(line);
+    if (r.type === "meta") lastMeta = r;
+    else if (r.type === "map") mapName = r.name;
+    else if (r.type === "names") playerInfo = r.names || {};
+    else if (r.type === "objects") {
+      const eco = {};
+      if (Array.isArray(r.v))
+        for (const row of r.v)
+          eco[row[1]] = (eco[row[1]] || 0) + 1;
+      snaps.push({ t: r.time, b: r.b, v: r.v, m: r.m, eco,
+                   cons: new Set(consNow) });
+    }
+    else if (r.type === "stats") statRows.push({ t: r.time, stats: r.stats });
+    else if (r.type === "scores")
+      scoreRows.push({ t: r.time, scores: r.scores || {} });
+    else if (r.type === "bld_event") {
+      // engine-derived construction events: start = foundation placed,
+      // done/lost = no longer under construction (stream order = time)
+      if (r.event === "start" && r.id !== undefined) consNow.add(r.id);
+      else if (r.id !== undefined) consNow.delete(r.id);
+    } else if (r.type === "chat")
+      chatRows.push({ t: r.time, msgs: r.msgs || [] });
+    else if (r.type === "fish")
+      fishSpots = r.pts || [];
+    else if (r.type === "res")
+      resRows.push({ t: r.time, g: r.g || [], s: r.s || [] });
+    else if (r.type === "trees")
+      treeRows.push({ t: r.time, all: r.all, cut: r.cut });
+  }
+  meta = lastMeta;
+  if (!meta || !snaps.length)
+    throw new Error("no usable rows in the positions file");
+  meta.mapName = mapName;
+  document.getElementById("mapname").textContent =
+    (meta.mapName ? meta.mapName + " \u2014 " : "") + tag;
+  buildStrip();
+  dataHasHp = snaps.some((s) => (s.b || []).some((r) => r.length >= 6));
+  hasRealScore = scoreRows.length > 0;
+  // resign/defeat announcements arrive as system chat naming the player
+  const RESIGN_RE = /resign|defeat|concede|surrender/i;
+  resignedAt = {};
+  for (const row of chatRows) {
+    for (const m of row.msgs) {
+      const text = typeof m === "string"
+        ? m : (m.text || m.message || m.Text || m.Message || "");
+      if (!RESIGN_RE.test(text)) continue;
+      for (const pid of Object.keys(playerInfo)) {
+        const name = playerInfo[pid].name;
+        if (name && text.includes(name)) {
+          resignedAt[pid] = row.t;
+          break;
+        }
+      }
+    }
+  }
+  hasResignData = Object.keys(resignedAt).length > 0;
+  const end = snaps[snaps.length - 1].t;
+  seekEl.max = end;
+  const t0 = parseFloat(new URLSearchParams(location.search).get("t"));
+  if (t0 > 0) { t = Math.min(t0, end); seekEl.value = t; }
+  requestAnimationFrame(loop);
+}
+
+load().catch((e) => {
+  document.getElementById("mapname").textContent = "ERROR: " + e.message;
+});
+
+// replay selector: list every collected replay, newest first. Uses the
+// server's /api/replays when up, falls back to a static tags.json
+// (written by map_build.py) on GitHub Pages.
+(async () => {
+  const sel = document.getElementById("replay");
+  let tags = [];
+  try {
+    const r = await fetch("/api/replays");
+    if (!r.ok) throw new Error();
+    tags = (await r.json()).tags || [];
+  } catch {
+    try {
+      const r = await fetch("tags.json");
+      if (r.ok) tags = (await r.json()).tags || [];
+    } catch { /* file:// or no export yet */ }
+  }
+  if (!tags.includes(tag)) tags.unshift(tag);
+  for (const t of tags) {
+    const o = document.createElement("option");
+    o.value = t;
+    o.textContent = t;
+    if (t === tag) o.selected = true;
+    sel.appendChild(o);
+  }
+  sel.onchange = () => {
+    // full reload is fine - data files are several MB
+    location.href = location.pathname + "?tag=" +
+      encodeURIComponent(sel.value);
+  };
+})();

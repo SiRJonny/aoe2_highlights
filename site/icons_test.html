@@ -1,0 +1,171 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AoE2 map icons — pick a set</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: block; padding: 14px; }
+  h2 { color: #9fb49f; font-size: 15px; margin: 14px 0 6px; }
+  .row { display: flex; align-items: center; gap: 14px; margin: 4px 0; }
+  .lbl { width: 150px; color: #8aa08a; }
+  canvas { background: #2d542d; border-radius: 3px; }
+  .dots canvas { background: #3f6f34; }
+  .miss { color: #c3332f; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1 style="font-size:18px">Building icon options</h1>
+<div id="sizehint" style="color:#8aa08a;font-size:12px"></div>
+<div id="sets"></div>
+<h2>Unit dots (villager / infantry / military / cavalry at ~4.7 px/tile) —
+<span class="qhint"></span></h2>
+<div id="units" class="dots"></div>
+<script src="icons.js"></script>
+<script>
+"use strict";
+const KINDS = ["town_center", "castle", "krepost", "donjon",
+               "fortified_church", "feitoria", "tower"];
+const SETS = ["square", "glyph", "emoji", "vector"];
+const NAMES = { town_center: "Town Center", castle: "Castle",
+                krepost: "Krepost", donjon: "Donjon",
+                fortified_church: "Fortified Church", feitoria: "Feitoria",
+                tower: "Tower" };
+
+// URL params, shared by the building rows and the unit rows below:
+//   ?sizes=8,12,16,20,24   example sizes for the building icon rows
+//   ?cav=1.45&inf=0.85&dot=1  unit dot multipliers (same as the app)
+const QS = new URLSearchParams(location.search);
+const qnum = (k, d) => {
+  const v = parseFloat(QS.get(k));
+  return v > 0 ? v : d;
+};
+const SIZES = (QS.get("sizes") || "").split(",")
+  .map((s) => parseFloat(s.trim()))
+  .filter((s) => s > 0 && s <= 200);
+if (!SIZES.length) SIZES.push(10, 14, 18, 24, 30);
+document.getElementById("sizehint").textContent =
+  "example sizes: " + SIZES.join(", ") + "  (?sizes=8,12,16,20,24)";
+
+function cell(size, painter) {
+  const c = document.createElement("canvas");
+  const pad = 4;
+  c.width = size + pad * 2; c.height = size + pad * 2;
+  const ctx = c.getContext("2d");
+  ctx.translate(pad + size / 2, pad + size / 2);
+  painter(ctx);
+  return c;
+}
+
+function drawIcon(setName, kind, ctx, size) {
+  const color = "#0000FF";
+  const icon = ICON_SETS[setName][kind];
+  const r = size / 2;
+  ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
+  ctx.fillStyle = color;
+  if (setName === "vector" && icon) {
+    ctx.save();
+    ctx.scale(size / 24, size / 24);
+    ctx.translate(-12, -12);         // painters draw in a 24x24 box
+    ctx.lineWidth = 2; ctx.lineJoin = "round";
+    icon(ctx);
+    ctx.restore();
+    return;
+  }
+  ctx.fillRect(-r, -r, size, size);
+  ctx.strokeRect(-r, -r, size, size);
+  const glyph = icon;
+  if (glyph) {
+    ctx.font = Math.round(size * (setName === "emoji" ? 0.72 : 0.85)) +
+      "px serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#fff";
+    ctx.fillText(glyph, 0, size * 0.04);
+    ctx.strokeText(glyph, 0, size * 0.04);
+  }
+}
+
+function render() {
+  const root = document.getElementById("sets");
+  root.innerHTML = "";
+  for (const setName of SETS) {
+    const h = document.createElement("h2");
+    h.textContent = setName + (setName === "glyph" ? "  (original)" : "");
+    root.appendChild(h);
+    for (const kind of KINDS) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const lbl = document.createElement("span");
+      lbl.className = "lbl";
+      lbl.textContent = NAMES[kind];
+      row.appendChild(lbl);
+      for (const s of SIZES) {
+        row.appendChild(cell(s, (ctx) => drawIcon(setName, kind, ctx, s)));
+      }
+      root.appendChild(row);
+    }
+  }
+}
+
+// unit dots: villager 0.5, infantry, military, cavalry tiles; sizes come
+// from the same URL params as the app: ?cav= &inf= &dot=
+const infM = qnum("inf", 2), cavM = qnum("cav", 3), dotS = qnum("dot", 1);
+document.querySelector(".qhint").textContent =
+  "?cav=" + cavM + "&inf=" + infM + "&dot=" + dotS;
+const pxPerTile = 1080 / 231;
+const UNITS = [
+  ["villager 0.5", 0.5 * dotS, "dot", null],
+  ["military", 0.75 * dotS, "dot", null],
+  ["infantry silhouette (x" + infM + ")", 0.75 * infM * dotS, "soldier",
+   null],
+  ["cavalry silhouette (x" + cavM + ")", 0.75 * cavM * dotS, "horse",
+   "#FF9205"],
+  ["warship silhouette", 0.75 * dotS, "ship", null],
+];
+const ur = document.getElementById("units");
+for (const [name, tiles, mode, colorOverride] of UNITS) {
+  const row = document.createElement("div");
+  row.className = "row";
+  const lbl = document.createElement("span");
+  lbl.className = "lbl";
+  lbl.textContent = name + "  (" + (tiles * pxPerTile).toFixed(1) + "px)";
+  row.appendChild(lbl);
+  for (const mult of [0.6, 0.8, 1.0, 1.2]) {
+    const s = Math.max(2, tiles * pxPerTile * mult);
+    if (mode !== "dot") {
+      // silhouette box = 2.2x the dot size, like app.js; bigger cell
+      const c = document.createElement("canvas");
+      const box = s * 2.2;
+      c.width = box + 8; c.height = box + 8;
+      const ctx = c.getContext("2d");
+      ctx.translate(4 + box / 2, 4 + box / 2);
+      ctx.save();
+      ctx.scale(box / 24, box / 24);
+      ctx.translate(-12, -12);
+      ctx.lineWidth = 2; ctx.lineJoin = "round";
+      ctx.strokeStyle = "rgba(0,0,0,.75)";
+      if (mode === "horse") CAVALRY_SHAPE(ctx, colorOverride || "#0000FF");
+      else if (mode === "soldier")
+        SOLDIER_SHAPE(ctx, colorOverride || "#0000FF");
+      else SHIP_SHAPE(ctx, colorOverride || "#0000FF");
+      ctx.restore();
+      row.appendChild(c);
+      continue;
+    }
+    row.appendChild(cell(s, (ctx) => {
+      const r = s / 2;
+      ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
+      ctx.fillStyle = colorOverride || "#0000FF";
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(1.1, r), 0, 6.2832);
+      ctx.fill();
+      ctx.stroke();
+    }));
+  }
+  ur.appendChild(row);
+}
+
+render();
+</script>
+</body>
+</html>

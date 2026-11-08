@@ -15,22 +15,31 @@ body {
   border: 1px solid #3c4a3c; border-radius: 4px;
 }
 #mapname { font-weight: 600; color: #9fb49f; }
-#scorelabel { color: #8aa08a; }
-/* column-header row: shares the .prow flex template so labels sit over
- * their columns */
-#colheads {
+#scorebar { display: flex; flex-direction: column; gap: 8px; }
+#scorebar .thead {
   display: flex; align-items: baseline; gap: 6px;
   color: #6a7a6a; font-size: 10px; text-transform: uppercase;
   letter-spacing: .06em;
+  border-bottom: 1px solid #2c352c; padding-bottom: 2px;
 }
-#colheads .cdot { width: 10px; flex: 0 0 auto; }
-#colheads .cplayer { flex: 1; }
-#colheads .cpop { min-width: 3ch; text-align: right; }
-#colheads .cage { min-width: 22px; text-align: center; }
-#colheads .ceco { min-width: 3.5ch; text-align: right; }
-#colheads .cscore { min-width: 5.5ch; text-align: right; }
-#scorebar { display: flex; flex-direction: column; gap: 8px; }
-#scorebar .bars { display: flex; flex-direction: column; gap: 4px; }
+/* column labels share the .prow flex template so they sit over their
+ * pop/eco columns */
+#scorebar .thead .hdot { width: 10px; flex: 0 0 auto; }
+#scorebar .thead .hname { flex: 1; }
+#scorebar .thead .hpop { min-width: 3ch; text-align: right; }
+#scorebar .thead .hage { min-width: 22px; }
+#scorebar .thead .heco { min-width: 3.5ch; text-align: right; }
+#scorebar .thead .hscore { min-width: 5.5ch; }
+#scorebar .bars { display: flex; flex-direction: column; gap: 5px; }
+#scorebar .bar-row { display: flex; align-items: flex-end; gap: 6px; }
+#scorebar .barwrap { flex: 1; display: flex; flex-direction: column;
+  gap: 2px; }
+#scorebar .blabel { color: #8aa08a; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .06em; text-align: center; }
+/* 3-digit space both sides (max possible count ~800) */
+#scorebar .bbl, #scorebar .bbr { width: 3ch; color: #fff;
+  font-variant-numeric: tabular-nums; }
+#scorebar .bbr { text-align: right; }
 /* team split bars: blue fills from the left, red from the right, the
  * divider at the teams' share (widths set inline from updateStrip) */
 #scorebar .bar {
