@@ -27,6 +27,8 @@ def log(msg):
 
 
 _api12_first = True   # one full read per match, then res-only refreshes
+_type_names = {}      # mtid -> name, stashed from the meta row
+_tree_alive = set()   # alive forest tiles at the last refresh
 
 
 def _read_objects_raw(row, positions_path, fh):
@@ -80,8 +82,21 @@ def _read_objects_raw(row, positions_path, fh):
              if ut == 102 and alive]
     fh.write(json.dumps({"type": "res", "time": row.get("time"),
                          "g": gold, "s": stone}) + "\n")
+    # forest trees: unit ids whose static name ends in TREE (meta info).
+    # One full alive list on the first read, then a delta row per
+    # refresh carrying only the spots chopped away since the last read
+    # (a depleted pile leaves the buffer; the terrain stays painted, so
+    # the client draws a stump mark on each removed tile).
+    tree_ids = {int(tid) for tid, nm in _type_names.items()
+                if nm.upper().endswith("TREE")}
+    alive_trees = {(x, y) for oid, ut, x, y, player, alive in objs
+                   if ut in tree_ids and alive}
     if _api12_first:
         _api12_first = False
+        _tree_alive.clear()
+        _tree_alive.update(alive_trees)
+        fh.write(json.dumps({"type": "trees", "time": row.get("time"),
+                             "all": sorted(t for t in alive_trees)}) + "\n")
         # big rows only land once per match: full raw dump + census +
         # the one-shot fish row
         with open(raw_path, "w", encoding="utf-8") as rf:
@@ -103,9 +118,16 @@ def _read_objects_raw(row, positions_path, fh):
         fh.write(json.dumps({"type": "fish", "time": row.get("time"),
                              "n": len(fish), "pts": fish}) + "\n")
         log("objects_raw: %d entries (%d alive) -> %s; fish spots: %d; "
-            "gold: %d, stone: %d"
+            "gold: %d, stone: %d, trees: %d"
             % (len(objs), sum(hist.values()), raw_path, len(fish),
-               len(gold), len(stone)))
+               len(gold), len(stone), len(alive_trees)))
+    else:
+        cut = _tree_alive - alive_trees
+        if cut:
+            fh.write(json.dumps({"type": "trees", "time": row.get("time"),
+                                 "cut": sorted(t for t in cut)}) + "\n")
+        _tree_alive.clear()
+        _tree_alive.update(alive_trees)
 
 
 
@@ -146,6 +168,10 @@ def collect_positions(handle, positions_path, max_minutes):
     snapshots, tc_snap and stats (age/resources/pop/score per player),
     drops everything else. Ends on the same
     20-s no-advance stall as collect (replay ended)."""
+    global _api12_first, _type_names, _tree_alive
+    _api12_first = True        # fresh positions.jsonl -> fresh full read
+    _type_names = {}           # re-stash from a fresh meta row
+    _tree_alive = set()
     # NOTE: no pre-read after set_speed — rows arriving in that window
     # (a fresh map_mode's meta + tc_snap) are DATA; the loop below
     # filters acks/ticks by type instead.
@@ -162,6 +188,10 @@ def collect_positions(handle, positions_path, max_minutes):
                 rt = r.get("type")
                 if rt == "api12_ptr":
                     _read_objects_raw(r, positions_path, fh)
+                if rt == "meta" and r.get("typeNames"):
+                    _type_names.update(
+                        (int(k), v) for k, v in r["typeNames"].items()
+                        if k.isdigit())
                 if (rt not in ("meta", "objects", "tc_snap", "stats",
                                "scores", "chat", "bld_event", "api12_ptr",
                                "tick")):

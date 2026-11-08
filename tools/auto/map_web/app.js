@@ -92,6 +92,9 @@ let curMil = {};          // military units on the board per player
 let fishSpots = [];       // one-time fish layer from the raw buffer
 let resRows = [];         // gold/stone pile lists from the raw buffer
 let resI = -1;
+let treeRows = [];        // full tree list once, then cut deltas
+let treeI = -1;
+const treeSet = new Set(); // "x|y" -> forest tile still has a tree
 let scoresI = -1, curScores = null;   // real score rows, aligned to t
 let hasRealScore = false; // score rows exist (else eco count is shown)
 let dataHasHp = false;    // snapshot building rows carry hp (new data)
@@ -176,6 +179,14 @@ function pruneBuildings(rows) {
     out.push(r);
   }
   return out;
+}
+
+// advance the tree layer: 'all' is the fresh snapshot (no cuts yet),
+// 'cut' adds the tiles chopped away since the last refresh
+function applyTreeRow(row) {
+  if (Array.isArray(row.all)) treeSet.clear();
+  if (Array.isArray(row.cut))
+    for (const [x, y] of row.cut) treeSet.add(x + "|" + y);
 }
 
 function draw() {
@@ -286,6 +297,35 @@ function draw() {
         ctx.fillRect(-half, -half, half * 2, half * 2);
         ctx.restore();
       }
+    }
+  }
+
+  // tree depletion: the raw buffer keeps a tile only while the tree is
+  // there - the collector sends the full alive list once, then only the
+  // spots removed per refresh; a small stump dot marks each chopped
+  // tile (the terrain keeps the forest painted under it)
+  let ti = (treeI >= 0 && treeRows[treeI] && treeRows[treeI].t <= t)
+    ? treeI : -1;
+  while (ti + 1 < treeRows.length && treeRows[ti + 1].t <= t) ti++;
+  if (ti !== treeI) {
+    if (ti > treeI && treeI >= 0) {
+      for (let k = treeI + 1; k <= ti; k++) applyTreeRow(treeRows[k]);
+    } else {
+      treeSet.clear();
+      for (let k = 0; k <= ti; k++) applyTreeRow(treeRows[k]);
+    }
+    treeI = ti;
+  }
+  if (treeSet.size) {
+    ctx.fillStyle = "#6b4423";
+    for (const key of treeSet) {
+      const c = key.indexOf("|");
+      const [tx, ty] = toScreen(+key.slice(0, c) + 0.5,
+                                +key.slice(c + 1) + 0.5);
+      const rad = Math.max(1, 0.3 * tile);
+      ctx.beginPath();
+      ctx.arc(tx, ty, rad, 0, 6.2832);
+      ctx.fill();
     }
   }
 
@@ -739,6 +779,8 @@ async function load() {
       fishSpots = r.pts || [];
     else if (r.type === "res")
       resRows.push({ t: r.time, g: r.g || [], s: r.s || [] });
+    else if (r.type === "trees")
+      treeRows.push({ t: r.time, all: r.all, cut: r.cut });
   }
   meta = lastMeta;
   if (!meta || !snaps.length)
