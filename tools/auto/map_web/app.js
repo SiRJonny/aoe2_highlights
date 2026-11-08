@@ -87,6 +87,7 @@ let lastTs = null;
 let idxA = null, idxB = null, idxI = -1;
 let bPlain = null, bNotable = null;   // buildings split for draw order
 let curEco = {};          // eco count (villagers + fishers + traders)
+let fishSpots = [];       // one-time fish layer from the raw buffer
 let scoresI = -1, curScores = null;   // real score rows, aligned to t
 let hasRealScore = false; // score rows exist (else eco count is shown)
 let dataHasHp = false;    // snapshot building rows carry hp (new data)
@@ -233,6 +234,30 @@ function draw() {
   ctx.setTransform(view.z, 0, 0, view.z, view.x, view.y);
 
   const toScreen = (x, y) => [(x + y) * s2, (D - x + y) * s2];
+
+  // static fish layer: fish are DEAD_OR_FISH to the engine (alive=0,
+  // invisible to every object query) - the collector reads them once
+  // per match from the GetObjectsPtr raw buffer; shore fish = pale
+  // dot, deep schools = fish icon
+  for (const fp of fishSpots) {
+    const [fx, fy] = toScreen(fp[0], fp[1]);
+    if (fp[2] === 53 || fp[2] === 69) {
+      ctx.fillStyle = "#f5f5f5";
+      ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
+      ctx.beginPath();
+      ctx.arc(fx, fy, Math.max(1.3, 0.9 * tile), 0, 6.2832);
+      ctx.fill(); ctx.stroke();
+      continue;
+    }
+    ctx.save();
+    ctx.translate(fx, fy);
+    ctx.scale(tile * 0.22, tile * 0.22);
+    ctx.translate(-12, -12);
+    ctx.lineWidth = 2; ctx.lineJoin = "round";
+    ctx.strokeStyle = "rgba(0,0,0,.6)";
+    FISH_SHAPE(ctx);
+    ctx.restore();
+  }
 
   const layer = (rowsIn, from, to, sizeKey, circular) => {
     const rows = Array.isArray(rowsIn) ? rowsIn : [];
@@ -632,6 +657,8 @@ async function load() {
       else if (r.id !== undefined) consNow.delete(r.id);
     } else if (r.type === "chat")
       chatRows.push({ t: r.time, msgs: r.msgs || [] });
+    else if (r.type === "fish")
+      fishSpots = r.pts || [];
   }
   meta = lastMeta;
   if (!meta || !snaps.length)

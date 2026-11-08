@@ -66,8 +66,18 @@ def _read_objects_raw(row, positions_path, fh):
     fh.write(json.dumps({"type": "api12_out", "entries": len(objs),
                          "alive": sum(hist.values()), "hist": hist,
                          "pos": pos}) + "\n")
-    log("objects_raw: %d entries (%d alive) -> %s"
-        % (len(objs), sum(hist.values()), raw_path))
+    # fish: DEAD_OR_FISH - alive=0 forever and invisible to every object
+    # query, so they only exist in this buffer (the SP fishtest map
+    # proved the ids: 53 Perch / 69 Shore / 450-451 Marlin /
+    # 455-458 Dorado, Salmon, Tuna, Snapper). One static row; fish
+    # deplete when gathered but the buffer carries no HP for them.
+    FISH_IDS = {53, 69, 450, 451, 455, 456, 457, 458}
+    fish = [[x, y, ut] for oid, ut, x, y, player, alive in objs
+            if ut in FISH_IDS]
+    fh.write(json.dumps({"type": "fish", "time": row.get("time"),
+                         "n": len(fish), "pts": fish}) + "\n")
+    log("objects_raw: %d entries (%d alive) -> %s; fish spots: %d"
+        % (len(objs), sum(hist.values()), raw_path, len(fish)))
 
 
 

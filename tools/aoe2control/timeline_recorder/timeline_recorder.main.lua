@@ -228,18 +228,9 @@ end
 
 local mapW, mapH = 0, 0     -- map size, captured when the meta is sent
 local mapTicks = 0          -- snapshots since the match started
-local fishTypes = { [53] = "fs", [69] = "fs", [455] = "fs",
-                    [456] = "fs", [457] = "fs", [458] = "fs",
-                    [450] = "f", [451] = "f" }
-local fishPoints = nil      -- camera targets for the fish sweep
-local fishIdx = 0
-local fishPendingCam = nil  -- camera moved this tick, query next tick
-local fishRows = {}         -- accumulated fish rows
-local fishActive = false
-local gaiaHistAcc = {}      -- one-shot census of the area-sweep population
-local gaiaHistSent = false
-local fishCache = nil       -- fish rows from the last area sweep
-local fishLastSweep = -1e9
+-- fish come from the GetObjectsPtr raw buffer read by the collector:
+-- fish are DEAD_OR_FISH to the engine (alive=0 forever, invisible to
+-- every object query - proven on the SP fishtest map)
 local function sendMeta()
     local players = {}
     local count = GetPlayerCount()
@@ -310,11 +301,6 @@ function Init()
     IPC.StartServer(PIPE)
     buildHouseTypeSet()
     buildAnimalTypeSet()
-    -- file-locals persist across menu phases; re-arm the one-shot census
-    gaiaHistAcc = {}
-    gaiaHistSent = false
-    fishCache = nil
-    fishLastSweep = -1e9
     militaryClasses = findMilitaryClasses()
     if #militaryClasses > 0 then
         Log("timeline_recorder: pipe " .. PIPE .. " started, "
@@ -433,17 +419,7 @@ local function handleCommands()
                 speedName = msg.speedName,
             }
             send("ack", { action = "seek", t = seek.t })
-        elseif action == "fish_points" then
-        -- camera targets over the water: the collector picked them from
-        -- the terrain; the sweep moves the camera point by point (area
-        -- queries only see loaded objects near the camera)
-        fishPoints = msg.points or {}
-        fishIdx = 0
-        fishRows = {}
-        fishPendingCam = nil
-        fishActive = true
-        send("ack", { action = action })
-    elseif action == "map_mode" then
+        elseif action == "map_mode" then
             mapMode = msg.on ~= false
             -- (re)send meta + tc snapshots: the map client may attach
             -- mid-replay and would otherwise never see players, map
@@ -1264,9 +1240,9 @@ local function sample()
                 end
             end
         end)
-        -- gaia layer for the map: animals (olive dots) and fish (white
-        -- markers), owner 0 = gaia; row[5] tag picks the client style:
-        -- a = animal, f = big fish (icon), fs = small fish (dot)
+        -- gaia layer for the map: animals (olive dots), owner 0 =
+        -- gaia; row[5] tag picks the client style: a = animal
+        -- (fish come from the collector's GetObjectsPtr read instead)
         local gtagClasses = {
             a = { "DOMESTIC_ANIMAL", "PREY_ANIMAL", "PREDATOR_ANIMAL",
                   "CONTROLLED_ANIMAL" },
@@ -1288,66 +1264,6 @@ local function sample()
                     end)
                 end
             end
-        end
-        -- fish: not in the UnitClass buckets nor in GetObjectsByType
-        -- (0 objects) — sweep the whole map area (size captured when
-        -- the meta was sent; GetMapWidth misbehaves later) and tag fish
-        -- by type (ids from aoc-reference-data): f = great marlin
-        -- (deep), fs = shore/species fish
-        if mapW > 0 and GetGameTime() - fishLastSweep > 60 then
-            fishLastSweep = GetGameTime()
-            local fishTypes = { [53] = "fs", [69] = "fs", [455] = "fs",
-                                [456] = "fs", [457] = "fs", [458] = "fs",
-                                [450] = "f", [451] = "f" }
-            -- small area queries + GetObjectStates, proven by the api8
-            -- corner census; 6x6 grid of 39x39-tile cells covers the map
-            local rows = {}
-            local step = math.ceil(mapW / 6)
-            for gy = 0, mapH - 1, step do
-                for gx = 0, mapW - 1, step do
-                    pcall(function()
-                        local gst = GetObjectStates(GetObjectsInArea(
-                            Vector2(gx, gy),
-                            Vector2(math.min(gx + step, mapW),
-                                    math.min(gy + step, mapH))))
-                        if gst and gst.id then
-                            for i = 1, #gst.id do
-                                local ut = gst.unitType[i]
-                                if not gaiaHistSent then
-                                    local key = tostring(gst.playerId[i])
-                                        .. ":" .. tostring(ut)
-                                    gaiaHistAcc[key] =
-                                        (gaiaHistAcc[key] or 0) + 1
-                                end
-                                local tag = fishTypes[ut]
-                                if tag then
-                                    table.insert(rows, { gst.id[i], 0,
-                                        ut, round1(gst.x[i]),
-                                        round1(gst.y[i]), tag })
-                                end
-                                if not gaiaHistSent then
-                                    local key = tostring(gst.playerId[i])
-                                        .. ":" .. tostring(ut)
-                                    gaiaHistAcc[key] =
-                                        (gaiaHistAcc[key] or 0) + 1
-                                end
-                            end
-                        end
-                    end)
-                end
-            end
-            if #rows > 0 or not fishCache then
-                fishCache = rows          -- keep a good cache on an
-            end                           -- empty re-sweep
-        end
-        if fishCache then
-            for _, fr in ipairs(fishCache) do
-                table.insert(m, fr)
-            end
-        end
-        if not gaiaHistSent and GetGameTime() > 60 then
-            gaiaHistSent = true
-            send("api6_hist", { hist = gaiaHistAcc })
         end
         -- api8: probe the top-right corner (the fish the user saw at
         -- game start) via the RAW object methods
@@ -1633,42 +1549,6 @@ function Update()
     end
 
     local t = GetGameTime()
-    -- fish sweep: move the camera over the water points (one point per
-    -- two ticks: move, then query around it); area queries only see
-    -- loaded objects near the camera
-    if fishActive and fishPoints then
-        if fishPendingCam then
-            local p = fishPendingCam
-            fishPendingCam = nil
-            pcall(function()
-                local gst = GetObjectStates(GetObjectsInArea(
-                    Vector2(p.x - 25, p.y - 25),
-                    Vector2(p.x + 25, p.y + 25)))
-                if gst and gst.id then
-                    for i = 1, #gst.id do
-                        local tag = fishTypes[gst.unitType[i]]
-                        if tag then
-                            table.insert(fishRows, { gst.id[i], 0,
-                                gst.unitType[i], round1(gst.x[i]),
-                                round1(gst.y[i]), tag })
-                        end
-                    end
-                end
-            end)
-            fishIdx = fishIdx + 1
-            if fishIdx >= #fishPoints then
-                fishActive = false
-                fishPoints = nil
-                send("fish_done", { count = #fishRows })
-            end
-        else
-            local p = fishPoints[fishIdx + 1]
-            if p then
-                SetCameraPosition(Vector2(p.x, p.y))
-                fishPendingCam = p
-            end
-        end
-    end
     -- time can go backwards (replay restart/rewind): reset the schedule
     if lastT and t and t < lastT then
         nextSampleTime = 0
@@ -1680,11 +1560,7 @@ function Update()
         pan = nil
         -- per-match state too: the menu phase after inject runs the
         -- snapshot block with leftover game time and consumes one-shot
-        -- state (the empty sweep assigned an empty fishCache there)
-        fishCache = nil
-        fishLastSweep = -1e9
-        gaiaHistAcc = {}
-        gaiaHistSent = false
+        -- state
         mapTicks = 0
         api9Sent = false
         api12Done = false
