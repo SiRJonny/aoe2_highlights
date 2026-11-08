@@ -1,14 +1,16 @@
 """Map-animation webapp: serve collected positions + terrain to a canvas UI.
 
 Serves tools/auto/map_web/ static files and, from the out folder:
-    /api/data/<tag>   out/<tag>/positions.jsonl  (streamed text)
-    /api/map/<tag>    out/<tag>/map.png
+    /api/replays     collected tags (newest first)
+    /api/data/<tag>  out/<tag>/positions.jsonl  (streamed text)
+    /api/map/<tag>   out/<tag>/map.png
 
 Usage:
     py -3.12 tools\\auto\\map_app.py [--tag demo] [--port 8787]
     -> http://localhost:8787/?tag=demo
 """
 import argparse
+import json
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -46,6 +48,15 @@ class Handler(BaseHTTPRequestHandler):
         if path in STATIC:
             name, ctype = STATIC[path]
             self._send((WEB / name).read_bytes(), ctype)
+            return
+        if path == "/api/replays":
+            tags = sorted(
+                (d.name for d in OUT.iterdir()
+                 if d.is_dir() and (d / "positions.jsonl").exists()),
+                key=lambda n: (OUT / n / "positions.jsonl").stat().st_mtime,
+                reverse=True)
+            self._send(json.dumps({"tags": tags}).encode(),
+                       "application/json; charset=utf-8")
             return
         if path.startswith("/api/data/"):
             tag = Path(path).name

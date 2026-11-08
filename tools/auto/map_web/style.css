@@ -10,6 +10,10 @@ body {
   border-right: 1px solid #2c352c;
   display: flex; flex-direction: column; gap: 10px;
 }
+#replay {
+  width: 100%; height: 28px; background: #233023; color: #cfd8cf;
+  border: 1px solid #3c4a3c; border-radius: 4px;
+}
 #mapname { font-weight: 600; color: #9fb49f; }
 #scorelabel { color: #8aa08a; }
 /* column-header row: shares the .prow flex template so labels sit over

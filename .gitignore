@@ -8,3 +8,6 @@ AoE2Control_1.1.5/
 
 __pycache__/
 *.pyc
+
+# GitHub Pages bundle built by tools/auto/map_build.py
+dist/

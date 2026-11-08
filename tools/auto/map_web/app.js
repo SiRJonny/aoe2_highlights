@@ -620,14 +620,28 @@ canvas.addEventListener("dblclick", () => { view = { x: 0, y: 0, z: 1 }; });
 
 async function load() {
   document.getElementById("mapname").textContent = "loading " + tag + " ...";
+  // data: server API first, static export fallback for GitHub Pages
   const [txt] = await Promise.all([
-    fetch("/api/data/" + tag).then((r) => {
-      if (!r.ok) throw new Error("no positions for '" + tag + "'");
-      return r.text();
-    }),
+    fetch("/api/data/" + tag)
+      .then((r) => {
+        if (!r.ok) throw new Error("bad status " + r.status);
+        return r.text();
+      })
+      .catch(() =>
+        fetch("data/" + tag + ".jsonl").then((r) => {
+          if (!r.ok) throw new Error("no positions for '" + tag + "'");
+          return r.text();
+        })),
     new Promise((res) => {
+      let tries = 0;
       bgImg.onload = () => { bgReady = true; res(); };
-      bgImg.onerror = res;
+      bgImg.onerror = () => {
+        // server API missing (static GitHub Pages deploy): fall back to
+        // the exported map/<tag>.png
+        tries += 1;
+        if (tries === 1) bgImg.src = "map/" + tag + ".png";
+        else res();
+      };
       bgImg.src = "/api/map/" + tag;
     }),
   ]);
@@ -698,3 +712,34 @@ async function load() {
 load().catch((e) => {
   document.getElementById("mapname").textContent = "ERROR: " + e.message;
 });
+
+// replay selector: list every collected replay, newest first. Uses the
+// server's /api/replays when up, falls back to a static tags.json
+// (written by map_build.py) on GitHub Pages.
+(async () => {
+  const sel = document.getElementById("replay");
+  let tags = [];
+  try {
+    const r = await fetch("/api/replays");
+    if (!r.ok) throw new Error();
+    tags = (await r.json()).tags || [];
+  } catch {
+    try {
+      const r = await fetch("tags.json");
+      if (r.ok) tags = (await r.json()).tags || [];
+    } catch { /* file:// or no export yet */ }
+  }
+  if (!tags.includes(tag)) tags.unshift(tag);
+  for (const t of tags) {
+    const o = document.createElement("option");
+    o.value = t;
+    o.textContent = t;
+    if (t === tag) o.selected = true;
+    sel.appendChild(o);
+  }
+  sel.onchange = () => {
+    // full reload is fine - data files are several MB
+    location.href = location.pathname + "?tag=" +
+      encodeURIComponent(sel.value);
+  };
+})();
