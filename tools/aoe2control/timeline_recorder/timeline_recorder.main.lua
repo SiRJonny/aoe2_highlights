@@ -1610,7 +1610,8 @@ function Update()
 
     tickCounter = tickCounter + 1
     if tickCounter % 10 == 0 then
-        send("tick", { t = t, ns = nextSampleTime, n = tickCounter })
+        send("tick", { t = t, ns = nextSampleTime, n = tickCounter,
+                       mt = mapTicks, a9 = api9Sent })
     end
 
     if not t or t < nextSampleTime then
