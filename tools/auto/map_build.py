@@ -24,6 +24,27 @@ STATICS = ("index.html", "app.js", "icons.js", "hp.js", "style.css",
            "icons_test.html")
 
 
+def _has_players(f: Path) -> bool:
+    """Skip replays whose mgz header failed to parse: they carry no
+    names row (flat map, no player names). It lands last in the stream,
+    so scan the file tail."""
+    try:
+        with open(f, "rb") as fh:
+            fh.seek(0, 2)
+            size = fh.tell()
+            fh.seek(max(0, size - 65536))
+            tail = fh.read(65536).decode("utf-8", "replace")
+        i = tail.find('"type": "names"')
+        if i < 0:
+            return False
+        row = tail[max(0, tail.rfind("\n", 0, i)) + 1:
+                   tail.find("\n", i)].strip()
+        return bool(json.loads(row).get("names"))
+    except Exception:
+        pass
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(ROOT / "dist"),
@@ -38,7 +59,7 @@ def main():
     tags = []   # newest first (positions.jsonl mtime)
     for d in OUT.iterdir():
         pos = d / "positions.jsonl"
-        if not d.is_dir() or not pos.exists():
+        if not d.is_dir() or not pos.exists() or not _has_players(pos):
             continue
         tags.append(d.name)
         (dist / "data").mkdir(exist_ok=True)

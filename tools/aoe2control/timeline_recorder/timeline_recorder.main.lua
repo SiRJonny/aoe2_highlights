@@ -800,7 +800,6 @@ end
 -- "fp" = GetFact(fact, pid), "pf" = GetFact(pid, fact)); "none" when
 -- nothing works -> the client falls back to its eco count
 local scoreSig = nil
-local api12Done = false     -- one-shot GetObjectsPtr raw buffer probe
 local function scoreCall(pid)
     local factIdx = Fact.CURRENT_SCORE
     if scoreSig == "method" then
@@ -1156,9 +1155,10 @@ local function sample()
         end
         -- api12: the raw objects snapshot buffer (GetObjectsPtr) - the
         -- one API surface the object-list queries do not go through;
-        -- Python reads the packed 12-byte entries straight from memory
-        if mapTicks > 25 and not api12Done then
-            api12Done = true
+        -- Python reads the packed 12-byte entries straight from memory.
+        -- Re-sent every ~8 sample ticks (~9 game-seconds) so gold and
+        -- stone piles drop off the map layer once depleted.
+        if mapW > 0 and mapTicks > 25 and mapTicks % 8 == 0 then
             pcall(function()
                 local ptr, count = GetObjectsPtr()
                 send("api12_ptr", { ptr = tonumber(ptr) or 0,
@@ -1206,7 +1206,6 @@ function Update()
         -- snapshot block with leftover game time and consumes one-shot
         -- state
         mapTicks = 0
-        api12Done = false
     end
     lastT = t
 

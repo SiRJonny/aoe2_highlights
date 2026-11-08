@@ -34,6 +34,28 @@ STATIC = {
 }
 
 
+def _has_players(f: Path) -> bool:
+    """Sane-replay check for the selector: when the replay's mgz header
+    fails to parse, no names row is ever emitted (flat fallback map, no
+    player names). The names row lands last in the stream, so scan the
+    file tail."""
+    try:
+        with open(f, "rb") as fh:
+            fh.seek(0, 2)
+            size = fh.tell()
+            fh.seek(max(0, size - 65536))
+            tail = fh.read(65536).decode("utf-8", "replace")
+        i = tail.find('"type": "names"')
+        if i < 0:
+            return False
+        row = tail[max(0, tail.rfind("\n", 0, i)) + 1:
+                   tail.find("\n", i)].strip()
+        return bool(json.loads(row).get("names"))
+    except Exception:
+        pass
+    return False
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, body: bytes, ctype: str, code=200):
         self.send_response(code)
@@ -55,6 +77,8 @@ class Handler(BaseHTTPRequestHandler):
                  if d.is_dir() and (d / "positions.jsonl").exists()),
                 key=lambda n: (OUT / n / "positions.jsonl").stat().st_mtime,
                 reverse=True)
+            tags = [t for t in tags if _has_players(OUT / t /
+                                                    "positions.jsonl")]
             self._send(json.dumps({"tags": tags}).encode(),
                        "application/json; charset=utf-8")
             return

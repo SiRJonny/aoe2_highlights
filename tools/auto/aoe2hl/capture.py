@@ -26,12 +26,17 @@ def log(msg):
     print(msg, flush=True)
 
 
+_api12_first = True   # one full read per match, then res-only refreshes
+
+
 def _read_objects_raw(row, positions_path, fh):
     """Reads the packed object buffer the module exposed with
     GetObjectsPtr() straight from the game process: writes every alive
     object to objects_raw.jsonl next to positions.jsonl and one
     api12_out summary row (census + positions for small-count types)
-    into the positions stream."""
+    into the positions stream. On every read it also emits one fish
+    and one res row; the big rows only land on the first read."""
+    global _api12_first
     import struct
 
     from aoe2hl import rawmem
@@ -50,22 +55,6 @@ def _read_objects_raw(row, positions_path, fh):
     objs = rawmem.parse_objects(data)
     raw_path = os.path.join(os.path.dirname(positions_path) or ".",
                             "objects_raw.jsonl")
-    with open(raw_path, "w", encoding="utf-8") as rf:
-        for oid, ut, x, y, player, alive in objs:
-            rf.write(json.dumps([oid, ut, x, y, player, alive]) + "\n")
-    hist = {}
-    pos = {}
-    for oid, ut, x, y, player, alive in objs:
-        if not alive:
-            continue
-        key = "%d:%d" % (player, ut)
-        n = hist.get(key, 0) + 1
-        hist[key] = n
-        if n <= 400:                       # skip the thousands of trees
-            pos.setdefault(key, []).append("%d,%d" % (x, y))
-    fh.write(json.dumps({"type": "api12_out", "entries": len(objs),
-                         "alive": sum(hist.values()), "hist": hist,
-                         "pos": pos}) + "\n")
     # fish/aquatic layer: DEAD_OR_FISH objects - alive=0 forever and
     # invisible to every object query (probes api13-16 on the fishtest
     # and mp5 maps: GetObjectsByType/ByClass/GetObjectsInArea all
@@ -78,18 +67,52 @@ def _read_objects_raw(row, positions_path, fh):
     # buffer carries no resource amount for them.
     FISH_SHORE = {53, 69, 1141}
     FISH_DEEP = {450, 451, 455, 456, 457, 458, 61, 621}
-    FISH_WHALE = set()   # whale id unknown yet, none on this map
+    FISH_WHALE = set()   # whale id unknown yet, none seen
     fish = [[x, y, ut] for oid, ut, x, y, player, alive in objs
             if ut in FISH_SHORE or ut in FISH_DEEP or ut in FISH_WHALE]
-    fh.write(json.dumps({"type": "fish", "time": row.get("time"),
-                         "n": len(fish), "pts": fish}) + "\n")
-    log("objects_raw: %d entries (%d alive) -> %s; fish spots: %d"
-        % (len(objs), sum(hist.values()), raw_path, len(fish)))
+    # gold & stone mines: alive gaia objects (66/102). With the module
+    # re-sending the buffer pointer periodically (~9 game-seconds), one
+    # res row lands per refresh and a depleted pile simply leaves the
+    # list.
+    gold = [[x, y] for oid, ut, x, y, player, alive in objs
+            if ut == 66 and alive]
+    stone = [[x, y] for oid, ut, x, y, player, alive in objs
+             if ut == 102 and alive]
+    fh.write(json.dumps({"type": "res", "time": row.get("time"),
+                         "g": gold, "s": stone}) + "\n")
+    if _api12_first:
+        _api12_first = False
+        # big rows only land once per match: full raw dump + census +
+        # the one-shot fish row
+        with open(raw_path, "w", encoding="utf-8") as rf:
+            for oid, ut, x, y, player, alive in objs:
+                rf.write(json.dumps([oid, ut, x, y, player, alive]) + "\n")
+        hist = {}
+        pos = {}
+        for oid, ut, x, y, player, alive in objs:
+            if not alive:
+                continue
+            key = "%d:%d" % (player, ut)
+            n = hist.get(key, 0) + 1
+            hist[key] = n
+            if n <= 400:                   # skip the thousands of trees
+                pos.setdefault(key, []).append("%d,%d" % (x, y))
+        fh.write(json.dumps({"type": "api12_out", "entries": len(objs),
+                             "alive": sum(hist.values()), "hist": hist,
+                             "pos": pos}) + "\n")
+        fh.write(json.dumps({"type": "fish", "time": row.get("time"),
+                             "n": len(fish), "pts": fish}) + "\n")
+        log("objects_raw: %d entries (%d alive) -> %s; fish spots: %d; "
+            "gold: %d, stone: %d"
+            % (len(objs), sum(hist.values()), raw_path, len(fish),
+               len(gold), len(stone)))
 
 
 
 def collect(handle, events_path, max_minutes):
     """Stream module rows at FASTEST to events_path until time stalls."""
+    global _api12_first
+    _api12_first = True        # fresh positions.jsonl -> fresh full read
     drive.send(handle, {"action": "set_speed", "speedName": "FASTEST"})
     drive.read_for(handle, 3, quiet=True)
 

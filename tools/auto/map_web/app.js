@@ -77,6 +77,7 @@ let chatRows = [];        // [{t, msgs}] chat capture (resign messages)
 let consNow = new Set();  // building ids currently under construction
 let playerInfo = {};      // pid -> {name, colorId, team}
 let chips = [];           // {pid, scoreEl, ageEl}
+let barTeams = [], barMil = null, barEco = null;  // team split bars
 let bgImg = new Image();
 let bgReady = false;
 let playing = false;
@@ -87,7 +88,10 @@ let lastTs = null;
 let idxA = null, idxB = null, idxI = -1;
 let bPlain = null, bNotable = null;   // buildings split for draw order
 let curEco = {};          // eco count (villagers + fishers + traders)
+let curMil = {};          // military units on the board per player
 let fishSpots = [];       // one-time fish layer from the raw buffer
+let resRows = [];         // gold/stone pile lists from the raw buffer
+let resI = -1;
 let scoresI = -1, curScores = null;   // real score rows, aligned to t
 let hasRealScore = false; // score rows exist (else eco count is shown)
 let dataHasHp = false;    // snapshot building rows carry hp (new data)
@@ -190,6 +194,10 @@ function draw() {
   if (idxI !== i || !idxA) {
     idxA = { b: idIndex(s0, "b"), m: idIndex(s0, "m"), v: idIndex(s0, "v") };
     idxB = { b: idIndex(s1, "b"), m: idIndex(s1, "m"), v: idIndex(s1, "v") };
+    const milCount = {};
+    for (const row of s0.m || [])
+      milCount[row[1]] = (milCount[row[1]] || 0) + 1;
+    curMil = milCount;
     const bDed = pruneBuildings(s0.b);
     bNotable = bDed.filter((r) => notableKindFor(r[2]));
     bPlain = bDed.filter((r) => !notableKindFor(r[2]));
@@ -255,10 +263,30 @@ function draw() {
       continue;
     }
     ctx.fillStyle = "#f5f5f5";
-    const r = Math.max(1.1, 0.7 * tile);
+    const r = Math.max(1, 0.45 * tile);
     ctx.beginPath();
     ctx.arc(fx, fy, r, 0, 6.2832);
     ctx.fill();
+  }
+
+  // gold/stone mines: alive gaia objects read from the same raw buffer
+  // as the fish; sparse re-reads drop a pile once fully harvested
+  while (resI + 1 < resRows.length && resRows[resI + 1].t <= t) resI++;
+  const resNow = resI >= 0 ? resRows[resI] : null;
+  if (resNow) {
+    for (const [spots, fill] of [[resNow.g, "#ffd75e"],
+                                 [resNow.s, "#c2ccf0"]]) {
+      for (const rp of spots) {
+        const [rx, ry] = toScreen(rp[0] + 0.5, rp[1] + 0.5);
+        ctx.fillStyle = fill;
+        ctx.save();
+        ctx.translate(rx, ry);
+        ctx.rotate(Math.PI / 4);
+        const half = 0.42 * tile;
+        ctx.fillRect(-half, -half, half * 2, half * 2);
+        ctx.restore();
+      }
+    }
   }
 
   const layer = (rowsIn, from, to, sizeKey, circular) => {
@@ -464,6 +492,18 @@ function updateStrip() {
     return sum(b.dataset.team) - sum(a.dataset.team);
   });
   for (const g of groups) stripEl.appendChild(g);
+  // update the split bars (team 1 left, team 2 right) from the counts
+  // at this sample: military units on the board and the eco count
+  if (barMil && barTeams.length === 2) {
+    const sum = (table, key) => (teams[key] || [])
+      .reduce((s2, c) => s2 + (table[c.pid] || 0), 0);
+    const split = (bar, a, b) => {
+      const share = a + b > 0 ? a / (a + b) : 0.5;
+      bar.l.style.width = (share * 100).toFixed(2) + "%";
+    };
+    split(barMil, sum(curMil, barTeams[0]), sum(curMil, barTeams[1]));
+    split(barEco, sum(curEco, barTeams[0]), sum(curEco, barTeams[1]));
+  }
 }
 
 function buildStrip() {
@@ -478,6 +518,31 @@ function buildStrip() {
     teams[team].push(p.id);
   }
   const teamKeys = Object.keys(teams).sort((a, b) => +a - +b);
+  // team strength bars above the team panels: military on top, eco
+  // below; team 1 fills from the left, team 2 from the right, the
+  // divider sits at the teams' share of the total counts
+  barTeams = [];
+  barMil = barEco = null;
+  if (teamKeys.length === 2) {
+    barTeams = teamKeys;
+    const box = document.createElement("div");
+    box.className = "bars";
+    const mk = (title) => {
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      bar.title = title;
+      const l = document.createElement("div");
+      l.className = "lb";
+      const r = document.createElement("div");
+      r.className = "rb";
+      bar.append(l, r);
+      box.appendChild(bar);
+      return { l, r };
+    };
+    barMil = mk("team military split");
+    barEco = mk("team eco split");
+    stripEl.appendChild(box);
+  }
   for (const key of teamKeys) {
     const group = document.createElement("div");
     group.className = "tgroup";
@@ -672,6 +737,8 @@ async function load() {
       chatRows.push({ t: r.time, msgs: r.msgs || [] });
     else if (r.type === "fish")
       fishSpots = r.pts || [];
+    else if (r.type === "res")
+      resRows.push({ t: r.time, g: r.g || [], s: r.s || [] });
   }
   meta = lastMeta;
   if (!meta || !snaps.length)

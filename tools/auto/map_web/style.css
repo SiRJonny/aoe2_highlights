@@ -30,6 +30,15 @@ body {
 #colheads .ceco { min-width: 3.5ch; text-align: right; }
 #colheads .cscore { min-width: 5.5ch; text-align: right; }
 #scorebar { display: flex; flex-direction: column; gap: 8px; }
+#scorebar .bars { display: flex; flex-direction: column; gap: 4px; }
+/* team split bars: blue fills from the left, red from the right, the
+ * divider at the teams' share (widths set inline from updateStrip) */
+#scorebar .bar {
+  height: 13px; display: flex; overflow: hidden;
+  background: #0d130d; border: 1px solid #2c352c; border-radius: 4px;
+}
+#scorebar .bar .lb { background: #2b6ff5; }
+#scorebar .bar .rb { background: #d43a3a; flex: 1; }
 #scorebar .tgroup {
   background: #1a221a; border: 1px solid #2c352c; border-radius: 4px;
   padding: 4px 6px;
