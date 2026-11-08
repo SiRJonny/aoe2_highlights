@@ -1401,6 +1401,8 @@ local function sample()
         -- members, 100 per sample tick - a full sweep in one tick
         -- overruns the Update and gets killed mid-send
         if mapTicks > 20 and not api9Sent then
+            api9Sent = true
+            send("api9_started", { mapTicks = mapTicks })
             if not api9Members then
                 api9Members = {}
                 for name, tid in pairs(UnitObjectType) do

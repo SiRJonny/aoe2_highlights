@@ -82,7 +82,7 @@ def collect_positions(handle, positions_path, max_minutes):
                                "api5_area", "api5_keys", "api5_rawkeys",
                                "api6_hist", "api7_shiparea", "api8_corner",
                                "api8_hist", "api9_types", "api9_classes",
-                               "api9_progress", "api10_cam", "api11_gaia",
+                               "api9_progress", "api9_started", "api10_cam", "api11_gaia",
                                "api11_fishtypes")
                         and not rt.startswith("api2")):
                     continue
