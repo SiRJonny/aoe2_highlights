@@ -26,6 +26,50 @@ def log(msg):
     print(msg, flush=True)
 
 
+def _read_objects_raw(row, positions_path, fh):
+    """Reads the packed object buffer the module exposed with
+    GetObjectsPtr() straight from the game process: writes every alive
+    object to objects_raw.jsonl next to positions.jsonl and one
+    api12_out summary row (census + positions for small-count types)
+    into the positions stream."""
+    import struct
+
+    from aoe2hl import rawmem
+    ptr = int(row.get("ptr") or 0)
+    count = int(row.get("count") or 0)
+    if ptr <= 0 or count <= 0:
+        fh.write(json.dumps({"type": "api12_out", "err": "empty buffer",
+                             "ptr": ptr, "count": count}) + "\n")
+        return
+    try:
+        data = rawmem.read_buffer(game.game_pid(), ptr, count * rawmem.OBJ_SIZE)
+    except Exception as exc:
+        fh.write(json.dumps({"type": "api12_out", "err": str(exc),
+                             "ptr": ptr, "count": count}) + "\n")
+        return
+    objs = rawmem.parse_objects(data)
+    raw_path = os.path.join(os.path.dirname(positions_path) or ".",
+                            "objects_raw.jsonl")
+    with open(raw_path, "w", encoding="utf-8") as rf:
+        for oid, ut, x, y, player, alive in objs:
+            rf.write(json.dumps([oid, ut, x, y, player, alive]) + "\n")
+    hist = {}
+    pos = {}
+    for oid, ut, x, y, player, alive in objs:
+        if not alive:
+            continue
+        key = "%d:%d" % (player, ut)
+        n = hist.get(key, 0) + 1
+        hist[key] = n
+        if n <= 400:                       # skip the thousands of trees
+            pos.setdefault(key, []).append("%d,%d" % (x, y))
+    fh.write(json.dumps({"type": "api12_out", "entries": len(objs),
+                         "alive": sum(hist.values()), "hist": hist,
+                         "pos": pos}) + "\n")
+    log("objects_raw: %d entries (%d alive) -> %s"
+        % (len(objs), sum(hist.values()), raw_path))
+
+
 
 def collect(handle, events_path, max_minutes):
     """Stream module rows at FASTEST to events_path until time stalls."""
@@ -76,14 +120,17 @@ def collect_positions(handle, positions_path, max_minutes):
         while time.time() < deadline:
             for r in drive.read_for(handle, 5, quiet=True):
                 rt = r.get("type")
+                if rt == "api12_ptr":
+                    _read_objects_raw(r, positions_path, fh)
                 if (rt not in ("meta", "objects", "tc_snap", "stats", "api",
                                "scores", "chat", "bld_event", "api3_gaia",
                                "api4_ot", "api4_area", "api4_fishtypes",
                                "api5_area", "api5_keys", "api5_rawkeys",
                                "api6_hist", "api7_shiparea", "api8_corner",
                                "api8_hist", "api9_types", "api9_classes",
-                               "api9_progress", "api9_started", "api10_cam", "api11_gaia",
-                               "api11_fishtypes", "tick")
+                               "api9_progress", "api9_started", "api10_cam",
+                               "api11_gaia", "api11_fishtypes", "api12_ptr",
+                               "tick")
                         and not rt.startswith("api2")):
                     continue
                 t = r.get("time")

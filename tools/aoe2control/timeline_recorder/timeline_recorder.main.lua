@@ -939,6 +939,7 @@ local scoreSig = nil
 local api8Done = false      -- one-time corner probe via raw objects
 local api10Done = false     -- one-time camera-area sweep
 local api9Sent = false      -- one-time numeric type-id sweep
+local api12Done = false     -- one-shot GetObjectsPtr raw buffer probe
 local function scoreCall(pid)
     local factIdx = Fact.CURRENT_SCORE
     if scoreSig == "method" then
@@ -1401,9 +1402,8 @@ local function sample()
         -- members, 100 per sample tick - a full sweep in one tick
         -- overruns the Update and gets killed mid-send
         if mapTicks > 20 and not api9Sent then
-            api9Sent = true
-            send("api9_started", { mapTicks = mapTicks })
             if not api9Members then
+                send("api9_started", { mapTicks = mapTicks })
                 api9Members = {}
                 for name, tid in pairs(UnitObjectType) do
                     table.insert(api9Members, { tid = tid, name = name })
@@ -1449,6 +1449,17 @@ local function sample()
                 send("api9_types", { counts = api9Counts,
                     firstPos = api9First, names = api9Names })
             end
+        end
+        -- api12: the raw objects snapshot buffer (GetObjectsPtr) - the
+        -- one API surface the object-list queries do not go through;
+        -- Python reads the packed 12-byte entries straight from memory
+        if mapTicks > 25 and not api12Done then
+            api12Done = true
+            pcall(function()
+                local ptr, count = GetObjectsPtr()
+                send("api12_ptr", { ptr = tonumber(ptr) or 0,
+                                    count = tonumber(count) or 0 })
+            end)
         end
         -- api11: the GAIA player's own object list - fish belong to
         -- gaia and the global queries returned none of them
@@ -1605,6 +1616,7 @@ function Update()
         gaiaHistSent = false
         mapTicks = 0
         api9Sent = false
+        api12Done = false
     end
     lastT = t
 

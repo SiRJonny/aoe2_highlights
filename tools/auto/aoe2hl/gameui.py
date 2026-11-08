@@ -130,6 +130,16 @@ def wait_anchor(anchor: str, timeout=30, threshold=0.86, poll=0.6) -> bool:
     return False
 
 
+def game_pid():
+    """Process id of the game window (for ReadProcessMemory)."""
+    import win32gui
+    import win32process
+    handle = win32gui.FindWindow(None, WINDOW_TITLE)
+    if not handle:
+        raise RuntimeError(f"game window not found ({WINDOW_TITLE!r})")
+    return win32process.GetWindowThreadProcessId(handle)[1]
+
+
 def focus_window():
     import win32con
     import win32gui
