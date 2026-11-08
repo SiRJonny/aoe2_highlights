@@ -45,8 +45,22 @@ def send(handle, payload, target_module="timeline_recorder"):
     win32file.WriteFile(handle, json.dumps(msg).encode("utf-8"))
 
 
+_pending = b""      # partial JSON line waiting for its remainder
+
+
 def _parse_chunk(chunk, rows, quiet):
-    for line in chunk.decode("utf-8", errors="replace").splitlines():
+    """Parses complete JSON lines; a line split across pipe reads is
+    buffered and completed by the next chunk (the map snapshot rows are
+    far larger than one 64KB read, so splits are routine)."""
+    global _pending
+    data = _pending + chunk
+    _pending = b""
+    if not data.endswith(b"\n"):
+        nl = data.rfind(b"\n") + 1
+        _pending = data[nl:]
+        data = data[:nl]
+    for line in data.split(b"\n"):
+        line = line.decode("utf-8", errors="replace")
         if not line.strip():
             continue
         try:
