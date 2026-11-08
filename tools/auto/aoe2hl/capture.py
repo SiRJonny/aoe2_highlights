@@ -140,6 +140,11 @@ def collect_positions(handle, positions_path, max_minutes):
                 if t and (last_t is None or t > last_t):
                     last_t = t
                     last_advance = time.time()
+                # empty Lua tables serialize as {} but the client wants
+                # arrays everywhere (b/v/m/pts)
+                for k, v in r.items():
+                    if v == {}:
+                        r[k] = []
                 fh.write(json.dumps(r) + "\n")
                 kept += 1
                 last_data = time.time()
