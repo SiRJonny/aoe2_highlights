@@ -237,24 +237,23 @@ function draw() {
 
   // static fish layer: fish are DEAD_OR_FISH to the engine (alive=0,
   // invisible to every object query) - the collector reads them once
-  // per match from the GetObjectsPtr raw buffer; shore fish = pale
-  // dot, deep schools = fish icon
+  // per match from the GetObjectsPtr raw buffer; buffer coords are
+  // tile corners, units plot at tile centers -> +0.5 on both axes;
+  // shore fish = pale dot, deep schools = fish icon
   for (const fp of fishSpots) {
-    const [fx, fy] = toScreen(fp[0], fp[1]);
+    const [fx, fy] = toScreen(fp[0] + 0.5, fp[1] + 0.5);
     if (fp[2] === 53 || fp[2] === 69) {
       ctx.fillStyle = "#f5f5f5";
-      ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
+      const r = Math.max(1.1, 0.7 * tile);
       ctx.beginPath();
-      ctx.arc(fx, fy, Math.max(1.3, 0.9 * tile), 0, 6.2832);
-      ctx.fill(); ctx.stroke();
+      ctx.arc(fx, fy, r, 0, 6.2832);
+      ctx.fill();
       continue;
     }
     ctx.save();
     ctx.translate(fx, fy);
-    ctx.scale(tile * 0.22, tile * 0.22);
+    ctx.scale(tile * 0.15, tile * 0.15);
     ctx.translate(-12, -12);
-    ctx.lineWidth = 2; ctx.lineJoin = "round";
-    ctx.strokeStyle = "rgba(0,0,0,.6)";
     FISH_SHAPE(ctx);
     ctx.restore();
   }
@@ -278,11 +277,9 @@ function draw() {
         if (tag5 === "a" || tag5 === "fs") {
           // gaia animal: small olive dot; small fish: white dot
           ctx.fillStyle = tag5 === "a" ? "#808000" : "#f5f5f5";
-          ctx.lineWidth = 1; ctx.strokeStyle = "rgba(0,0,0,.75)";
           ctx.beginPath();
           ctx.arc(x, y, Math.max(1.3, size * 0.45), 0, 6.2832);
           ctx.fill();
-          ctx.stroke();
           continue;
         }
         if (tag5 === "f") {
@@ -292,8 +289,6 @@ function draw() {
           const box = size * 2.8;
           ctx.scale(box / 24, box / 24);
           ctx.translate(-12, -12);
-          ctx.lineWidth = 2; ctx.lineJoin = "round";
-          ctx.strokeStyle = "rgba(0,0,0,.6)";
           FISH_SHAPE(ctx);
           ctx.restore();
           continue;
