@@ -1445,6 +1445,48 @@ local function sample()
                     firstPos = api9First, names = api9Names })
             end
         end
+        -- api11: the GAIA player's own object list - fish belong to
+        -- gaia and the global queries returned none of them
+        if mapTicks > 30 and not api11Sent then
+            api11Sent = true
+            pcall(function()
+                local g = GetPlayerById(0)
+                local out, err = {}, nil
+                if g then
+                    local ok, objs = pcall(function()
+                        return g:GetPlayerObjects()
+                    end)
+                    if ok and objs then
+                        local st = GetObjectStates(objs)
+                        if st and st.id then
+                            for i = 1, #st.id do
+                                local key = tostring(st.playerId[i]) .. ":"
+                                    .. tostring(st.unitType[i])
+                                out[key] = (out[key] or 0) + 1
+                            end
+                        end
+                    else
+                        err = tostring(objs)
+                    end
+                else
+                    err = "no gaia player"
+                end
+                send("api11_gaia", { out = out, err = err })
+            end)
+            pcall(function()
+                local g = GetPlayerById(0)
+                local res = {}
+                for _, ut in ipairs({ 53, 69, 450, 451, 455, 456, 457,
+                                      458 }) do
+                    local ok, objs = pcall(function()
+                        return g:GetObjectsByType(ut)
+                    end)
+                    res[tostring(ut)] = (ok and objs) and #objs
+                        or tostring(objs)
+                end
+                send("api11_fishtypes", { res = res })
+            end)
+        end
         send("objects", { b = b, v = v, m = m })
         -- api10: census around the camera AT GAME START (the fish the
         -- user saw were in view then); unknown-type objects report
