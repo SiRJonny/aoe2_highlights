@@ -1148,6 +1148,12 @@ local function sample()
                 end
             end
         end
+        -- snapshot counter: one per sample tick while the map is up;
+        -- the one-shot gates use this, NOT GetGameTime (game time is
+        -- leftover from the previous replay while the menu is up)
+        if mapW > 0 then
+            mapTicks = mapTicks + 1
+        end
         -- api12: the raw objects snapshot buffer (GetObjectsPtr) - the
         -- one API surface the object-list queries do not go through;
         -- Python reads the packed 12-byte entries straight from memory
