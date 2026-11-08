@@ -34,7 +34,9 @@ def tag_from_name(name):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--count", type=int, default=10)
-    ap.add_argument("--max-minutes", type=float, default=1)
+    ap.add_argument("--max-minutes", type=float, default=240,
+                    help="collect cap in wall minutes; default covers "
+                         "full-length games")
     ap.add_argument("--redo", action="store_true",
                     help="collect again even if the tag already exists")
     ap.add_argument("--dry", action="store_true", help="list and stop")
