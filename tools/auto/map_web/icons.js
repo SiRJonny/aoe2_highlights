@@ -176,9 +176,9 @@ const SHIP_SHAPE = (ctx, color) => {
   ctx.stroke();
 };
 
-/* Fish marker (gaia deep-sea fish): plain white body + tail. */
+/* Fish marker (gaia deep-sea fish): plain body + tail; draws in the
+ * caller's current fillStyle (white normally, gold for whales). */
 const FISH_SHAPE = (ctx) => {
-  ctx.fillStyle = "#ffffff";
   ctx.beginPath();
   ctx.ellipse(9.5, 12, 6, 3.4, 0, 0, 6.2832);
   ctx.fill();

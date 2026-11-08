@@ -239,23 +239,26 @@ function draw() {
   // invisible to every object query) - the collector reads them once
   // per match from the GetObjectsPtr raw buffer; buffer coords are
   // tile corners, units plot at tile centers -> +0.5 on both axes;
-  // shore fish = pale dot, deep schools = fish icon
+  // shore fish/turtles = pale dot, deep schools/dolphins = fish icon,
+  // whales (id unknown yet, none seen) = gold, bigger
+  const WHALES = new Set();
   for (const fp of fishSpots) {
     const [fx, fy] = toScreen(fp[0] + 0.5, fp[1] + 0.5);
-    if (fp[2] === 53 || fp[2] === 69) {
-      ctx.fillStyle = "#f5f5f5";
-      const r = Math.max(1.1, 0.7 * tile);
-      ctx.beginPath();
-      ctx.arc(fx, fy, r, 0, 6.2832);
-      ctx.fill();
+    if (!(fp[2] === 53 || fp[2] === 69 || fp[2] === 1141 || WHALES.has(fp[2]))) {
+      ctx.save();
+      ctx.translate(fx, fy);
+      ctx.scale(tile * (WHALES.has(fp[2]) ? 0.26 : 0.15), tile * (WHALES.has(fp[2]) ? 0.26 : 0.15));
+      ctx.translate(-12, -12);
+      ctx.fillStyle = WHALES.has(fp[2]) ? "#ffd75e" : "#ffffff";
+      FISH_SHAPE(ctx);
+      ctx.restore();
       continue;
     }
-    ctx.save();
-    ctx.translate(fx, fy);
-    ctx.scale(tile * 0.15, tile * 0.15);
-    ctx.translate(-12, -12);
-    FISH_SHAPE(ctx);
-    ctx.restore();
+    ctx.fillStyle = "#f5f5f5";
+    const r = Math.max(1.1, 0.7 * tile);
+    ctx.beginPath();
+    ctx.arc(fx, fy, r, 0, 6.2832);
+    ctx.fill();
   }
 
   const layer = (rowsIn, from, to, sizeKey, circular) => {
@@ -289,6 +292,7 @@ function draw() {
           const box = size * 2.8;
           ctx.scale(box / 24, box / 24);
           ctx.translate(-12, -12);
+          ctx.fillStyle = "#ffffff";
           FISH_SHAPE(ctx);
           ctx.restore();
           continue;
