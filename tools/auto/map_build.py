@@ -79,9 +79,10 @@ def main():
         suffix = ".jsonl.gz" if args.gzip else ".jsonl"
         data_path = dist / "data" / (d.name + suffix)
         if args.gzip:
-            with pos.open("rb") as source, gzip.open(
-                    data_path, "wb", compresslevel=9) as target:
-                shutil.copyfileobj(source, target)
+            with pos.open("rb") as source, data_path.open("wb") as packed:
+                with gzip.GzipFile(fileobj=packed, mode="wb", filename="",
+                                   compresslevel=9, mtime=0) as target:
+                    shutil.copyfileobj(source, target)
         else:
             shutil.copy2(pos, data_path)
         mp = d / "map.png"
@@ -92,6 +93,12 @@ def main():
               reverse=True)
     (dist / "tags.json").write_text(
         json.dumps({"tags": tags}, indent=1) + "\n", encoding="utf-8")
+    if args.tag and len(tags) == 1:
+        index = dist / "index.html"
+        html = index.read_text(encoding="utf-8")
+        html = html.replace("<html>",
+                            '<html data-default-tag="%s">' % tags[0], 1)
+        index.write_text(html, encoding="utf-8")
     (dist / ".nojekyll").touch()
     print("dist: %d replays, %d statics -> %s" % (len(tags), len(STATICS),
                                                   dist))

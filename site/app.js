@@ -15,7 +15,8 @@
 "use strict";
 
 const QS = new URLSearchParams(location.search);
-const tag = QS.get("tag") || "demo";
+const tag = QS.get("tag") || document.documentElement.dataset.defaultTag ||
+  "demo";
 const iconSet = QS.get("icons") || "vector";
 // EXACT DE team colors, from the game's own
 // resources/_common/palettes/spritecolors.json ("TeamColors", 0-1 floats
