@@ -190,6 +190,28 @@ function applyTreeRow(row) {
     for (const [x, y] of row.cut) treeSet.add(x + "|" + y);
 }
 
+// Raw-memory snapshots can briefly omit most resource objects. Keep piles
+// shared by adjacent snapshots through a one-row dip; real depletion stays
+// absent in the following snapshot and is therefore still shown.
+function stabilizeResRows() {
+  const key = (p) => p[0] + "," + p[1];
+  for (let i = 1; i + 1 < resRows.length; i++) {
+    const row = resRows[i], prev = resRows[i - 1], next = resRows[i + 1];
+    for (const field of ["g", "s"]) {
+      const cur = row[field] || [], before = prev[field] || [];
+      const after = next[field] || [];
+      if (cur.length >= 0.5 * Math.min(before.length, after.length))
+        continue;
+      const afterSet = new Set(after.map(key));
+      const common = before.filter((p) => afterSet.has(key(p)));
+      if (common.length < 0.75 * Math.min(before.length, after.length))
+        continue;
+      const curSet = new Set(cur.map(key));
+      row[field] = cur.concat(common.filter((p) => !curSet.has(key(p))));
+    }
+  }
+}
+
 // the terrain keeps forest tiles painted, so a chopped tile is
 // repainted with the map's own dominant grass color (most frequent
 // 3-bit-quantized greenish pixel); no readback when blocked
@@ -313,7 +335,10 @@ function draw() {
 
   // gold/stone mines: alive gaia objects read from the same raw buffer
   // as the fish; sparse re-reads drop a pile once fully harvested
-  while (resI + 1 < resRows.length && resRows[resI + 1].t <= t) resI++;
+  let ri = (resI >= 0 && resRows[resI] && resRows[resI].t <= t)
+    ? resI : -1;
+  while (ri + 1 < resRows.length && resRows[ri + 1].t <= t) ri++;
+  resI = ri;
   const resNow = resI >= 0 ? resRows[resI] : null;
   if (resNow) {
     for (const [spots, fill] of [[resNow.g, "#ffd75e"],
@@ -850,6 +875,7 @@ async function load() {
     else if (r.type === "trees")
       treeRows.push({ t: r.time, all: r.all, cut: r.cut });
   }
+  stabilizeResRows();
   meta = lastMeta;
   if (!meta || !snaps.length)
     throw new Error("no usable rows in the positions file");

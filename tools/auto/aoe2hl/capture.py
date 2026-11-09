@@ -31,7 +31,7 @@ _type_names = {}      # mtid -> name, stashed from the meta row
 _tree_alive = set()   # alive forest tiles at the last refresh
 
 
-def _read_objects_raw(row, positions_path, fh):
+def _read_objects_raw(row, positions_path, fh, data=None, read_error=None):
     """Reads the packed object buffer the module exposed with
     GetObjectsPtr() straight from the game process: writes every alive
     object to objects_raw.jsonl next to positions.jsonl and one
@@ -48,8 +48,17 @@ def _read_objects_raw(row, positions_path, fh):
         fh.write(json.dumps({"type": "api12_out", "err": "empty buffer",
                              "ptr": ptr, "count": count}) + "\n")
         return
+    if read_error is not None:
+        fh.write(json.dumps({"type": "api12_out", "err": read_error,
+                             "ptr": ptr, "count": count}) + "\n")
+        return
     try:
-        data = rawmem.read_buffer(game.game_pid(), ptr, count * rawmem.OBJ_SIZE)
+        if data is None:
+            data = rawmem.read_buffer(game.game_pid(), ptr,
+                                     count * rawmem.OBJ_SIZE)
+        if len(data) != count * rawmem.OBJ_SIZE:
+            raise OSError("short object buffer: %d/%d bytes"
+                          % (len(data), count * rawmem.OBJ_SIZE))
     except Exception as exc:
         fh.write(json.dumps({"type": "api12_out", "err": str(exc),
                              "ptr": ptr, "count": count}) + "\n")
@@ -183,11 +192,33 @@ def collect_positions(handle, positions_path, max_minutes):
     last_data = time.time()
     kept = 0
     with open(positions_path, "w", encoding="utf-8") as fh:
+        def prefetch_raw_buffer(r):
+            if r.get("type") != "api12_ptr":
+                return
+            ptr = int(r.get("ptr") or 0)
+            count = int(r.get("count") or 0)
+            if ptr <= 0 or count <= 0:
+                return
+            from aoe2hl import rawmem
+            try:
+                data = rawmem.read_buffer(game.game_pid(), ptr,
+                                          count * rawmem.OBJ_SIZE)
+                if len(data) != count * rawmem.OBJ_SIZE:
+                    raise OSError("short object buffer: %d/%d bytes"
+                                  % (len(data), count * rawmem.OBJ_SIZE))
+                r["_raw_buffer"] = data
+            except Exception as exc:
+                r["_raw_buffer_error"] = str(exc)
+
         while time.time() < deadline:
-            for r in drive.read_for(handle, 5, quiet=True):
+            rows = drive.read_for(handle, 5, quiet=True,
+                                  on_row=prefetch_raw_buffer)
+            for r in rows:
                 rt = r.get("type")
                 if rt == "api12_ptr":
-                    _read_objects_raw(r, positions_path, fh)
+                    data = r.pop("_raw_buffer", None)
+                    error = r.pop("_raw_buffer_error", None)
+                    _read_objects_raw(r, positions_path, fh, data, error)
                 if rt == "meta" and r.get("typeNames"):
                     _type_names.update(
                         (int(k), v) for k, v in r["typeNames"].items()

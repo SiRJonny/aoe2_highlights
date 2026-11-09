@@ -48,7 +48,7 @@ def send(handle, payload, target_module="timeline_recorder"):
 _pending = b""      # partial JSON line waiting for its remainder
 
 
-def _parse_chunk(chunk, rows, quiet):
+def _parse_chunk(chunk, rows, quiet, on_row=None):
     """Parses complete JSON lines; a line split across pipe reads is
     buffered and completed by the next chunk (the map snapshot rows are
     far larger than one 64KB read, so splits are routine)."""
@@ -72,6 +72,8 @@ def _parse_chunk(chunk, rows, quiet):
             payload.setdefault("module", env.get("source", {}).get(
                 "settingsGroup"))
             rows.append(payload)
+            if on_row is not None:
+                on_row(payload)
             if not quiet:
                 print(json.dumps(payload))
                 sys.stdout.flush()
@@ -110,7 +112,7 @@ def read_now(handle):
         _parse_chunk(chunk, rows, quiet=True)
 
 
-def read_for(handle, timeout_s, quiet=False):
+def read_for(handle, timeout_s, quiet=False, on_row=None):
     """Read rows for up to timeout_s without blocking past the deadline.
 
     PeekNamedPipe first: ReadFile itself would block indefinitely when no
@@ -145,7 +147,7 @@ def read_for(handle, timeout_s, quiet=False):
             print(f"PIPE ERROR during read: {exc}", file=sys.stderr,
                   flush=True)
             raise
-        _parse_chunk(chunk, rows, quiet)
+        _parse_chunk(chunk, rows, quiet, on_row)
     return rows
 
 
