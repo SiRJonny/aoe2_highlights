@@ -1080,6 +1080,11 @@ local function sample()
             i = { "INFANTRY" },
             c = { "CAVALRY", "SCOUT_CAVALRY", "CAVALRY_ARCHER",
                   "CAVALRY_RAIDER" },
+            -- siege/elephant tags route to dedicated silhouettes
+            -- client-side; rams + petards keep generic dots (the client
+            -- excludes them by unit-type id)
+            g = { "SIEGE_WEAPON" },
+            e = { "WAR_ELEPHANT", "ELEPHANT_ARCHER" },
         }
         for t, names in pairs(tagClasses) do
             for _, cn in ipairs(names) do
@@ -1118,6 +1123,34 @@ local function sample()
                         table.insert(m, { nst.id[i], pid, nst.unitType[i],
                                           round1(nst.x[i]), round1(nst.y[i]),
                                           "s" })
+                    end
+                end
+            end
+        end)
+        -- transport ships + bombard cannons: their classes sit outside
+        -- the navy and army censuses too, so capture them the same way
+        -- (tags t/k route to the transport / cannon silhouettes)
+        pcall(function()
+            local specialTagClasses = {
+                t = { "TRANSPORT_SHIP" },
+                k = { "ARCHERY_CANNON" },
+            }
+            for t, names in pairs(specialTagClasses) do
+                for _, cn in ipairs(names) do
+                    if UnitClass[cn] then
+                        local sst = GetObjectStates(
+                            GetObjectsByClasses({ UnitClass[cn] }))
+                        if sst and sst.id then
+                            for i = 1, #sst.id do
+                                local pid = sst.playerId[i]
+                                if pid and pid >= 1 then
+                                    table.insert(m, {
+                                        sst.id[i], pid, sst.unitType[i],
+                                        round1(sst.x[i]),
+                                        round1(sst.y[i]), t })
+                                end
+                            end
+                        end
                     end
                 end
             end

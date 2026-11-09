@@ -62,6 +62,32 @@ const SIZES = {
 };
 const AGE_ROMAN = ["I", "II", "III", "IV"];
 
+/* unit-type routing: silhouettes for transport ships, the common siege
+ * blob (NOT the 3 rams), bombards and elephants. Ids from the game's own
+ * meta typeNames (all MP collections carry the full mapping), so OLD
+ * tags need no re-collect; the Lua tag5 letters below only confirm. */
+const TRANSPORT_IDS = new Set([545]);          // TRANSPORT_SHIP
+const RAM_IDS = new Set([35, 422, 548, 1258]); // rams stay dots
+const SIEGE_IDS = new Set([
+  280,   // MANGONEL
+  550, 701,   // ONAGER (DE / WK packs)
+  588,   // SIEGE_ONAGER
+  279, 542,   // SCORPION, HEAVY_SCORPION
+  331, 42,    // TREBUCHET packed / unpacked
+  1690, 1691, // WARWOLF_TREBUCHET (+ packed)
+  1923, 1942, // MOUNTED / TRACTION_TREBUCHET
+]);
+const ELEPHANT_IDS = new Set([
+  239, 558,     // WAR_ELEPHANT (+ elite)
+  873, 875,     // ELEPHANT_ARCHER (+ elite)
+  1132, 1134,   // BATTLE_ELEPHANT (+ elite)
+  1120, 1122,   // BALLISTA_ELEPHANT (+ elite)
+  1301,         // ELEPHANT (RoR war elephant)
+  1744, 1746,   // ARMORED / SIEGE_ELEPHANT (RoR)
+]);
+const CANNON_IDS = new Set([36]);              // BOMBARD_CANNON
+const CANNON_SHIP_IDS = new Set([420, 691]);   // CANNON_GALLEON (+ elite)
+
 const canvas = document.getElementById("map");
 const ctx = canvas.getContext("2d");
 const playBtn = document.getElementById("play");
@@ -397,8 +423,21 @@ function draw() {
       let size = (kind ? SIZES.notable : SIZES[sizeKey]) * tile;
       if (circular) {
         // tags from the Lua side: i infantry, c cavalry, s warship,
-        // a gaia animal, f big fish, fs small fish
-        const tag5 = p[2] && p[2][5];
+        // a gaia animal, f big fish, fs small fish; g siege, e elephant,
+        // t transport, k cannon
+        const ut = p[2][2];
+        let tag5 = p[2][5];
+        // unit-type routing first: id sets cover old data (no new tags)
+        // AND never style rams / petards
+        let shape = TRANSPORT_IDS.has(ut) ? "t"
+                  : ELEPHANT_IDS.has(ut) ? "e"
+                  : CANNON_IDS.has(ut) ? "k"
+                  : SIEGE_IDS.has(ut) ? "g"
+                  : tag5;
+        // ram ids sneak in under the SIEGE_WEAPON tag -> keep dots
+        if (shape === "g" && RAM_IDS.has(ut)) shape = null;
+        // cannon galleons may ride the cannon class -> keep ships
+        if (shape === "k" && CANNON_SHIP_IDS.has(ut)) shape = "s";
         const mult = tag5 === "c" ? SIZES.cav
                    : tag5 === "i" ? SIZES.inf : 1;
         size *= mult * SIZES.dot;
@@ -422,7 +461,24 @@ function draw() {
           ctx.restore();
           continue;
         }
-        if (tag5 === "c" || tag5 === "i" || tag5 === "s") {
+        if (shape === "t" || shape === "g" || shape === "e"
+            || shape === "k") {
+          // silhouette marker; each gets its own read-size box
+          ctx.save();
+          ctx.translate(x, y);
+          const box = size * (shape === "t" ? 4.2
+            : shape === "e" ? 3.4 : shape === "g" ? 3.0 : 3.2);
+          ctx.scale(box / 24, box / 24);
+          ctx.translate(-12, -12);
+          ctx.lineWidth = 2; ctx.lineJoin = "round";
+          if (shape === "t") TRANSPORT_SHAPE(ctx, color);
+          else if (shape === "e") ELEPHANT_SHAPE(ctx, color);
+          else if (shape === "g") SIEGE_SHAPE(ctx, color);
+          else CANNON_SHAPE(ctx, color);
+          ctx.restore();
+          continue;
+        }
+        if (shape === "c" || shape === "i" || shape === "s") {
           // silhouette marker; ships get a much larger box (they read
           // poorly at dot size), the box may exceed the dot footprint
           ctx.save();
@@ -431,8 +487,8 @@ function draw() {
           ctx.scale(box / 24, box / 24);
           ctx.translate(-12, -12);
           ctx.lineWidth = 2; ctx.lineJoin = "round";
-          if (tag5 === "c") CAVALRY_SHAPE(ctx, color);
-          else if (tag5 === "i") SOLDIER_SHAPE(ctx, color);
+          if (shape === "c") CAVALRY_SHAPE(ctx, color);
+          else if (shape === "i") SOLDIER_SHAPE(ctx, color);
           else SHIP_SHAPE(ctx, color);
           ctx.restore();
           continue;

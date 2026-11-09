@@ -117,13 +117,37 @@ const UNITS = [
   ["villager 0.5", 0.5 * dotS, "dot", null],
   ["military", 0.75 * dotS, "dot", null],
   ["infantry silhouette (x" + infM + ")", 0.75 * infM * dotS, "soldier",
-   null],
-  ["cavalry silhouette (x" + cavM + ")", 0.75 * cavM * dotS, "horse",
-   "#FF9205"],
-  ["warship silhouette", 0.75 * dotS, "ship", null],
+   "#0000FF", 2.2],
+  ["cavalry silhouette (x" + cavM + ")", 0.75 * cavM * dotS, "horse"],
+  ["warship silhouette", 0.75 * dotS, "ship", "#0000FF", 4.6],
+  ["transport: sail", 0.75 * dotS, "transport_sail", "#0000FF", 4.2],
+  ["transport: deck (troops)", 0.75 * dotS, "transport_deck", "#0000FF",
+   4.2],
+  ["siege: mangonel arm", 0.75 * dotS, "siege_arm", "#0000FF", 3.0],
+  ["siege: ballista bolt", 0.75 * dotS, "siege_bolt", "#0000FF", 3.0],
+  ["cannon: barrel", 0.75 * dotS, "cannon_barrel", "#0000FF", 3.2],
+  ["cannon: mortar", 0.75 * dotS, "cannon_mortar", "#0000FF", 3.2],
+  ["elephant: howdah tower", 0.75 * dotS, "elephant_howdah", "#0000FF",
+   3.4],
+  ["elephant: plain", 0.75 * dotS, "elephant_plain", "#0000FF", 3.4],
 ];
+// per-variant painters: fall back to a shared default if a row uses the
+// 4-arg shape of the table
+const SHAPE_FN = {
+  soldier: (ctx, c) => SOLDIER_SHAPE(ctx, c || "#0000FF"),
+  horse: (ctx, c) => CAVALRY_SHAPE(ctx, c || "#FF9205"),
+  ship: (ctx, c) => SHIP_SHAPE(ctx, c || "#0000FF"),
+  transport_sail: TRANSPORT_SHAPES.sail,
+  transport_deck: TRANSPORT_SHAPES.deck,
+  siege_arm: SIEGE_SHAPES.arm,
+  siege_bolt: SIEGE_SHAPES.bolt,
+  cannon_barrel: CANNON_SHAPES.barrel,
+  cannon_mortar: CANNON_SHAPES.mortar,
+  elephant_howdah: ELEPHANT_SHAPES.howdah,
+  elephant_plain: ELEPHANT_SHAPES.plain,
+};
 const ur = document.getElementById("units");
-for (const [name, tiles, mode, colorOverride] of UNITS) {
+for (const [name, tiles, mode, colorOverride, boxMult] of UNITS) {
   const row = document.createElement("div");
   row.className = "row";
   const lbl = document.createElement("span");
@@ -133,9 +157,9 @@ for (const [name, tiles, mode, colorOverride] of UNITS) {
   for (const mult of [0.6, 0.8, 1.0, 1.2]) {
     const s = Math.max(2, tiles * pxPerTile * mult);
     if (mode !== "dot") {
-      // silhouette box = 2.2x the dot size, like app.js; bigger cell
+      // silhouette box = dot size x the mode's app box factor
       const c = document.createElement("canvas");
-      const box = s * 2.2;
+      const box = s * (boxMult || 2.2);
       c.width = box + 8; c.height = box + 8;
       const ctx = c.getContext("2d");
       ctx.translate(4 + box / 2, 4 + box / 2);
@@ -144,10 +168,7 @@ for (const [name, tiles, mode, colorOverride] of UNITS) {
       ctx.translate(-12, -12);
       ctx.lineWidth = 2; ctx.lineJoin = "round";
       ctx.strokeStyle = "rgba(0,0,0,.75)";
-      if (mode === "horse") CAVALRY_SHAPE(ctx, colorOverride || "#0000FF");
-      else if (mode === "soldier")
-        SOLDIER_SHAPE(ctx, colorOverride || "#0000FF");
-      else SHIP_SHAPE(ctx, colorOverride || "#0000FF");
+      SHAPE_FN[mode](ctx, colorOverride);
       ctx.restore();
       row.appendChild(c);
       continue;
