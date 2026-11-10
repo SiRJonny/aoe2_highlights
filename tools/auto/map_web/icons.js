@@ -151,28 +151,43 @@ const SOLDIER_SHAPE = (ctx, color) => {
   ctx.fill();
 };
 
-/* Warship marker: crescent hull with a white sail. */
+/* Warship marker: long low hull with an upturned bow and two white
+ * lateen sails (tall fore mast, shorter aft mast), after the user's
+ * reference sketch. */
 const SHIP_SHAPE = (ctx, color) => {
-  ctx.fillStyle = "#fff";
+  // masts first, so the hull and sails overlap them cleanly
   ctx.beginPath();
-  ctx.moveTo(12, 4);                              // sail
-  ctx.lineTo(17.5, 12.5);
-  ctx.lineTo(12, 12.5);
+  ctx.moveTo(9, 16);                              // fore mast
+  ctx.lineTo(9, 2.6);
+  ctx.moveTo(16.5, 16);                           // aft mast
+  ctx.lineTo(16.5, 6.6);
+  ctx.stroke();
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();                                // fore sail (bulges right)
+  ctx.moveTo(9.4, 3.4);
+  ctx.quadraticCurveTo(14.8, 6.2, 13.6, 12.2);
+  ctx.quadraticCurveTo(13.1, 14.4, 11.6, 15.4);
+  ctx.quadraticCurveTo(10.2, 9.4, 9.4, 3.8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();                                // aft sail
+  ctx.moveTo(16.9, 7.0);
+  ctx.quadraticCurveTo(20.6, 9.4, 19.6, 13.8);
+  ctx.quadraticCurveTo(19.2, 15.4, 18.0, 15.8);
+  ctx.quadraticCurveTo(16.7, 11.2, 16.9, 7.4);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
   ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(3.5, 15);                            // hull
-  ctx.quadraticCurveTo(12, 21.5, 20.5, 15);
-  ctx.lineTo(18.5, 13);
-  ctx.lineTo(5.5, 13);
+  ctx.beginPath();                                // hull
+  ctx.moveTo(2, 16.2);                            // bow tip
+  ctx.lineTo(21.6, 15.2);                         // deck line
+  ctx.quadraticCurveTo(20.4, 19.4, 17.2, 20.6);
+  ctx.quadraticCurveTo(9, 22, 4.4, 20.6);
+  ctx.quadraticCurveTo(2.6, 19.8, 2, 16.2);
   ctx.closePath();
   ctx.fill();
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(12, 13);                             // mast
-  ctx.lineTo(12, 3.5);
   ctx.stroke();
 };
 
