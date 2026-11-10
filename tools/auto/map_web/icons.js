@@ -296,7 +296,7 @@ const TRANSPORT_SHAPES = {
     ctx.stroke();
   },
 };
-const TRANSPORT_SHAPE = TRANSPORT_SHAPES.sail;
+const TRANSPORT_SHAPE = TRANSPORT_SHAPES.deck;
 
 /* Common siege (mangonel family + scorpions + trebs). "arm": A-frame
  * with a raised throwing arm and sling. "bolt": ballista/bolt thrower. */
