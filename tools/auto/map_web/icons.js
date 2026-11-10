@@ -303,37 +303,48 @@ const TRANSPORT_SHAPE = TRANSPORT_SHAPES.deck;
 const SIEGE_SHAPES = {
   arm(ctx, color) {
     ctx.fillStyle = color;
-    for (const wx of [5, 18]) {
+    for (const wx of [4.2, 17.8]) {
       ctx.beginPath();                            // 2 big wheels
-      ctx.arc(wx, 19, 2.6, 0, 6.2832);
+      ctx.arc(wx, 19, 2.5, 0, 6.2832);
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = "#fff";
       ctx.beginPath();
-      ctx.arc(wx, 19, 0.9, 0, 6.2832);
+      ctx.arc(wx, 19, 0.95, 0, 6.2832);
       ctx.fill();
       ctx.fillStyle = color;
     }
     ctx.beginPath();                              // horizontal beam
-    ctx.rect(3.6, 15.8, 15.8, 2.4);
+    ctx.rect(2.8, 16.4, 16.4, 2.2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();                              // upright post
+    ctx.rect(10.2, 6.4, 2.2, 10.4);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();                              // diagonal strut
+    ctx.moveTo(10.2, 16.8);
+    ctx.lineTo(10.4, 7.4);
+    ctx.lineTo(5.6, 16.8);
+    ctx.closePath();
     ctx.fill();
     ctx.stroke();
     ctx.save();                                   // throwing arm
-    ctx.translate(10.6, 16.4);
-    ctx.rotate(0.7);
+    ctx.translate(12.6, 16.6);
+    ctx.rotate(0.6);
     ctx.beginPath();
-    ctx.rect(-0.85, -11.3, 1.7, 12.1);
+    ctx.rect(-0.85, -11.5, 1.7, 12.0);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
     ctx.fillStyle = "#fff";                       // scoop
     ctx.beginPath();
-    ctx.arc(18.8, 6.6, 1.9, 0, 6.2832);
+    ctx.arc(19.9, 6.0, 2.2, 0, 6.2832);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = color;                        // hollow of the scoop
     ctx.beginPath();
-    ctx.arc(19.7, 5.9, 1.0, 0, 6.2832);
+    ctx.arc(20.7, 5.2, 1.05, 0, 6.2832);
     ctx.fill();
   },
   bolt(ctx, color) {
