@@ -379,9 +379,61 @@ const SIEGE_SHAPES = {
 };
 const SIEGE_SHAPE = SIEGE_SHAPES.arm;
 
-/* Bombard cannons. "barrel": angled tube on a two-wheel carriage,
- * muzzle ring picked out in white. "mortar": stubby steep tube. */
+/* Bombard cannons. "carriage": from the in-game bombard sprite — thick
+ * barrel at ~37°, angled carriage plate, big wheel + rear trail leg,
+ * white trunnion + muzzle ring. "barrel": angled tube on a two-wheel
+ * carriage. "mortar": stubby steep tube. */
 const CANNON_SHAPES = {
+  carriage(ctx, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();                              // rear trail leg
+    ctx.moveTo(2.6, 15.2);
+    ctx.lineTo(4.6, 14.8);
+    ctx.lineTo(4.2, 20.2);
+    ctx.lineTo(2.2, 20.0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();                              // angled carriage plate
+    ctx.moveTo(3.0, 15.8);
+    ctx.lineTo(10.8, 13.2);
+    ctx.lineTo(15.6, 17.2);
+    ctx.lineTo(6.2, 19.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();                              // big wheel
+    ctx.arc(16, 19, 2.7, 0, 6.2832);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();                              // hub
+    ctx.arc(16, 19, 0.95, 0, 6.2832);
+    ctx.fill();
+    ctx.beginPath();                              // trunnion
+    ctx.arc(12.4, 13.4, 1.0, 0, 6.2832);
+    ctx.fill();
+    ctx.fillStyle = color;
+    ctx.save();                                   // barrel tube
+    ctx.translate(4.8, 14.6);
+    ctx.rotate(-0.65);
+    ctx.beginPath();
+    ctx.rect(-1.5, -1.7, 16.0, 3.4);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    ctx.beginPath();                              // breech knob
+    ctx.arc(4.8, 14.6, 1.8, 0, 6.2832);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = "#fff";                     // muzzle ring
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(17.5, 4.9, 1.9, 0, 6.2832);
+    ctx.stroke();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(0,0,0,.75)";
+  },
   barrel(ctx, color) {
     ctx.fillStyle = color;
     for (const wx of [6.8, 14.6]) {
@@ -449,7 +501,7 @@ const CANNON_SHAPES = {
     ctx.stroke();
   },
 };
-const CANNON_SHAPE = CANNON_SHAPES.barrel;
+const CANNON_SHAPE = CANNON_SHAPES.carriage;
 
 /* Elephants. "howdah": war elephant with a battle tower + trunk.
  * "plain": same profile, tusk + forehead strap instead. */
