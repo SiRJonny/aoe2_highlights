@@ -433,9 +433,10 @@ function draw() {
                   : ELEPHANT_IDS.has(ut) ? "e"
                   : CANNON_IDS.has(ut) ? "k"
                   : SIEGE_IDS.has(ut) ? "g"
+                  : RAM_IDS.has(ut) ? "r"
                   : tag5;
-        // ram ids sneak in under the SIEGE_WEAPON tag -> keep dots
-        if (shape === "g" && RAM_IDS.has(ut)) shape = null;
+        // ram ids sneak in under the SIEGE_WEAPON tag -> own shed icon
+        if (shape === "g" && RAM_IDS.has(ut)) shape = "r";
         // cannon galleons may ride the cannon class -> keep ships
         if (shape === "k" && CANNON_SHIP_IDS.has(ut)) shape = "s";
         const mult = tag5 === "c" ? SIZES.cav
@@ -462,18 +463,20 @@ function draw() {
           continue;
         }
         if (shape === "t" || shape === "g" || shape === "e"
-            || shape === "k") {
+            || shape === "k" || shape === "r") {
           // silhouette marker; each gets its own read-size box
           ctx.save();
           ctx.translate(x, y);
           const box = size * (shape === "t" ? 4.2
-            : shape === "e" ? 3.4 : shape === "g" ? 3.0 : 3.2);
+            : shape === "e" ? 3.4 : shape === "g" ? 3.0
+            : shape === "r" ? 3.2 : 3.2);
           ctx.scale(box / 24, box / 24);
           ctx.translate(-12, -12);
           ctx.lineWidth = 2; ctx.lineJoin = "round";
           if (shape === "t") TRANSPORT_SHAPE(ctx, color);
           else if (shape === "e") ELEPHANT_SHAPE(ctx, color);
           else if (shape === "g") SIEGE_SHAPE(ctx, color);
+          else if (shape === "r") RAM_SHAPE(ctx, color);
           else CANNON_SHAPE(ctx, color);
           ctx.restore();
           continue;

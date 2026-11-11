@@ -298,102 +298,60 @@ const TRANSPORT_SHAPES = {
 };
 const TRANSPORT_SHAPE = TRANSPORT_SHAPES.deck;
 
-/* Common siege (mangonel family + scorpions + trebs). "arm": A-frame
- * with a raised throwing arm and sling. "bolt": ballista/bolt thrower. */
-const SIEGE_SHAPES = {
-  arm(ctx, color) {
-    ctx.fillStyle = color;
-    for (const wx of [4.2, 17.8]) {
-      ctx.beginPath();                            // 2 big wheels
-      ctx.arc(wx, 19, 2.5, 0, 6.2832);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(wx, 19, 0.95, 0, 6.2832);
-      ctx.fill();
-      ctx.fillStyle = color;
-    }
-    ctx.beginPath();                              // horizontal beam
-    ctx.rect(2.8, 16.4, 16.4, 2.2);
+/* Common siege (mangonel family + scorpions + trebs): catapult base
+ * after the user's sketch — beam on two big wheels, upright post with a
+ * diagonal strut, throwing arm with a white scoop. */
+const SIEGE_SHAPE = (ctx, color) => {
+  ctx.fillStyle = color;
+  for (const wx of [4.2, 17.8]) {
+    ctx.beginPath();                              // 2 big wheels
+    ctx.arc(wx, 19, 2.5, 0, 6.2832);
     ctx.fill();
-    ctx.stroke();
-    ctx.beginPath();                              // upright post
-    ctx.rect(10.2, 6.4, 2.2, 10.4);
-    ctx.fill();
-    ctx.stroke();
-    ctx.beginPath();                              // diagonal strut
-    ctx.moveTo(10.2, 16.8);
-    ctx.lineTo(10.4, 7.4);
-    ctx.lineTo(5.6, 16.8);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.save();                                   // throwing arm
-    ctx.translate(12.6, 16.6);
-    ctx.rotate(0.6);
-    ctx.beginPath();
-    ctx.rect(-0.85, -11.5, 1.7, 12.0);
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
-    ctx.fillStyle = "#fff";                       // scoop
-    ctx.beginPath();
-    ctx.arc(19.9, 6.0, 2.2, 0, 6.2832);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = color;                        // hollow of the scoop
-    ctx.beginPath();
-    ctx.arc(20.7, 5.2, 1.05, 0, 6.2832);
-    ctx.fill();
-  },
-  bolt(ctx, color) {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.rect(5.4, 14.6, 12.4, 4);                 // carriage
-    ctx.fill();
-    ctx.stroke();
-    for (const wx of [7.2, 16]) {
-      ctx.beginPath();                            // 2 wheels
-      ctx.arc(wx, 19.8, 2, 0, 6.2832);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(wx, 19.8, 0.8, 0, 6.2832);
-      ctx.fill();
-      ctx.fillStyle = color;
-    }
-    ctx.beginPath();                              // bow arc
-    ctx.moveTo(6.2, 13.4);
-    ctx.quadraticCurveTo(11.2, 5.6, 16.2, 13.4);
-    ctx.lineWidth = 1.6;
-    ctx.stroke();
-    ctx.lineWidth = 2;
-    ctx.beginPath();                              // string
-    ctx.moveTo(6.2, 13.4);
-    ctx.lineTo(16.2, 13.4);
-    ctx.stroke();
-    ctx.strokeStyle = "#fff";                     // bolt + head
-    ctx.beginPath();
-    ctx.moveTo(5, 11.6);
-    ctx.lineTo(19.6, 11.6);
     ctx.stroke();
     ctx.fillStyle = "#fff";
     ctx.beginPath();
-    ctx.moveTo(19.6, 11.6);
-    ctx.lineTo(16.8, 10);
-    ctx.lineTo(16.8, 13.2);
-    ctx.closePath();
+    ctx.arc(wx, 19, 0.95, 0, 6.2832);
     ctx.fill();
-  },
+    ctx.fillStyle = color;
+  }
+  ctx.beginPath();                                // horizontal beam
+  ctx.rect(2.8, 16.4, 16.4, 2.2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();                                // upright post
+  ctx.rect(10.2, 6.4, 2.2, 10.4);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();                                // diagonal strut
+  ctx.moveTo(10.2, 16.8);
+  ctx.lineTo(10.4, 7.4);
+  ctx.lineTo(5.6, 16.8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.save();                                     // throwing arm
+  ctx.translate(12.6, 16.6);
+  ctx.rotate(0.6);
+  ctx.beginPath();
+  ctx.rect(-0.85, -11.5, 1.7, 12.0);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = "#fff";                         // scoop
+  ctx.beginPath();
+  ctx.arc(19.9, 6.0, 2.2, 0, 6.2832);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = color;                          // hollow of the scoop
+  ctx.beginPath();
+  ctx.arc(20.7, 5.2, 1.05, 0, 6.2832);
+  ctx.fill();
 };
-const SIEGE_SHAPE = SIEGE_SHAPES.arm;
 
 /* Bombard cannons. "carriage": from the in-game bombard sprite — thick
  * barrel at ~37°, angled carriage plate, big wheel + rear trail leg,
- * white trunnion + muzzle ring. "barrel": angled tube on a two-wheel
- * carriage. "mortar": stubby steep tube. */
+ * white trunnion + muzzle ring. "barrel": plain angled tube on a
+ * two-wheel carriage (the app's pick). */
 const CANNON_SHAPES = {
   carriage(ctx, color) {
     ctx.fillStyle = color;
@@ -466,14 +424,6 @@ const CANNON_SHAPES = {
     ctx.fill();
     ctx.stroke();
     ctx.restore();
-    ctx.strokeStyle = "#fff";                     // muzzle ring
-    ctx.beginPath();
-    ctx.moveTo(17.4, 3.4);
-    ctx.lineTo(20.2, 6.2);
-    ctx.lineWidth = 1.6;
-    ctx.stroke();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "rgba(0,0,0,.75)";
     ctx.fillStyle = color;                        // carriage bed
     ctx.beginPath();
     ctx.moveTo(3.6, 17.6);
@@ -484,38 +434,11 @@ const CANNON_SHAPES = {
     ctx.fill();
     ctx.stroke();
   },
-  mortar(ctx, color) {
-    ctx.fillStyle = color;
-    for (const wx of [7.6, 15.4]) {
-      ctx.beginPath();                            // big wheels
-      ctx.arc(wx, 20.2, 2.3, 0, 6.2832);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(wx, 20.2, 0.9, 0, 6.2832);
-      ctx.fill();
-      ctx.fillStyle = color;
-    }
-    ctx.save();                                   // stub tube
-    ctx.translate(11.6, 11.8);
-    ctx.rotate(-1.05);
-    ctx.beginPath();
-    ctx.rect(-6.6, -3, 12, 6);
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
-    ctx.fillStyle = "#fff";                       // muzzle mouth
-    ctx.beginPath();
-    ctx.arc(16.4, 3.6, 1.5, 0, 6.2832);
-    ctx.fill();
-    ctx.stroke();
-  },
 };
-const CANNON_SHAPE = CANNON_SHAPES.carriage;
+const CANNON_SHAPE = CANNON_SHAPES.barrel;
 
-/* Elephants. "howdah": war elephant with a battle tower + trunk.
- * "plain": same profile, tusk + forehead strap instead. */
+/* Elephants. Side profile with just 2 visible legs (4 reads mushy at
+ * dot size), trunk + white tusk and forehead strap; no tower. */
 const elephantBody = (ctx, color) => {
   ctx.fillStyle = color;
   ctx.beginPath();
@@ -527,21 +450,13 @@ const elephantBody = (ctx, color) => {
   ctx.quadraticCurveTo(22.6, 12.8, 21.6, 18.0);   // trunk outer curve
   ctx.lineTo(20.3, 17.7);                         // trunk tip
   ctx.quadraticCurveTo(21.0, 13.6, 17.6, 13.0);   // trunk inner -> chin
-  ctx.lineTo(17.2, 14.4);                         // chest
-  ctx.lineTo(17.2, 19.9);                         // front leg
+  ctx.lineTo(17.6, 14.4);                         // chest
+  ctx.lineTo(17.6, 19.9);                         // front leg
   ctx.lineTo(15.4, 19.9);
   ctx.lineTo(15.4, 14.4);
-  ctx.lineTo(12.9, 14.4);                         // leg 3
-  ctx.lineTo(12.9, 19.9);
-  ctx.lineTo(11.0, 19.9);
-  ctx.lineTo(11.0, 14.4);
-  ctx.lineTo(8.0, 14.4);                          // leg 2
-  ctx.lineTo(8.0, 19.9);
-  ctx.lineTo(6.0, 19.9);
-  ctx.lineTo(6.0, 14.4);
-  ctx.lineTo(4.6, 14.4);                          // rear leg
-  ctx.lineTo(4.6, 19.9);
-  ctx.lineTo(2.8, 19.9);
+  ctx.lineTo(5.2, 14.4);                          // belly
+  ctx.lineTo(5.2, 19.9);                          // rear leg
+  ctx.lineTo(3.0, 19.9);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
@@ -554,29 +469,56 @@ const elephantBody = (ctx, color) => {
   ctx.lineTo(1.4, 16.8);
   ctx.stroke();
 };
-const ELEPHANT_SHAPES = {
-  howdah(ctx, color) {
-    elephantBody(ctx, color);
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(8.2, 3.0, 7.6, 5.6);             // tower
-    ctx.strokeRect(8.2, 3.0, 7.6, 5.6);
-    ctx.fillRect(8.2, 1.5, 7.6, 1.5);             // battlements
-    ctx.strokeRect(8.2, 1.5, 7.6, 1.5);
-  },
-  plain(ctx, color) {
-    elephantBody(ctx, color);
-    ctx.fillStyle = "#fff";                       // tusk
-    ctx.beginPath();
-    ctx.moveTo(18.2, 13.2);
-    ctx.lineTo(21.2, 15.6);
-    ctx.lineTo(17.8, 15.4);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillRect(14.6, 8.6, 3.6, 1.4);            // forehead strap
-    ctx.strokeRect(14.6, 8.6, 3.6, 1.4);
-  },
+const ELEPHANT_SHAPE = (ctx, color) => {
+  elephantBody(ctx, color);
+  ctx.fillStyle = "#fff";                         // tusk
+  ctx.beginPath();
+  ctx.moveTo(18.2, 13.2);
+  ctx.lineTo(21.2, 15.6);
+  ctx.lineTo(17.8, 15.4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillRect(14.6, 8.6, 3.6, 1.4);              // forehead strap
+  ctx.strokeRect(14.6, 8.6, 3.6, 1.4);
 };
-const ELEPHANT_SHAPE = ELEPHANT_SHAPES.howdah;
+
+/* Rams: penthouse shed on two small wheels with the ram log poking out
+ * front (white log head). */
+const RAM_SHAPE = (ctx, color) => {
+  ctx.fillStyle = color;
+  ctx.beginPath();                                // shed: domed roof
+  ctx.moveTo(2.6, 13.8);
+  ctx.quadraticCurveTo(11, 9.2, 19.2, 13.8);
+  ctx.lineTo(19.2, 19.4);
+  ctx.lineTo(2.6, 19.4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  for (const wx of [7, 15]) {                     // small wheels
+    ctx.beginPath();
+    ctx.arc(wx, 20.2, 1.7, 0, 6.2832);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(wx, 20.2, 0.7, 0, 6.2832);
+    ctx.fill();
+    ctx.fillStyle = color;
+  }
+  ctx.strokeStyle = "#fff";                       // ram log + head
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(18.6, 16.2);
+  ctx.lineTo(22.6, 17.0);
+  ctx.stroke();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(0,0,0,.75)";
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.arc(22.7, 17.0, 1.35, 0, 6.2832);
+  ctx.fill();
+  ctx.stroke();
+};
 
 const ICON_SETS = {
   square: {},

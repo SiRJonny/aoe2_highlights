@@ -123,15 +123,12 @@ const UNITS = [
   ["transport: sail", 0.75 * dotS, "transport_sail", "#0000FF", 4.2],
   ["transport: deck (troops)", 0.75 * dotS, "transport_deck", "#0000FF",
    4.2],
-  ["siege: mangonel arm", 0.75 * dotS, "siege_arm", "#0000FF", 3.0],
-  ["siege: ballista bolt", 0.75 * dotS, "siege_bolt", "#0000FF", 3.0],
+  ["siege: catapult arm", 0.75 * dotS, "siege_arm", "#0000FF", 3.0],
   ["cannon: carriage (sprite)", 0.75 * dotS, "cannon_carriage", "#0000FF",
    3.2],
   ["cannon: barrel", 0.75 * dotS, "cannon_barrel", "#0000FF", 3.2],
-  ["cannon: mortar", 0.75 * dotS, "cannon_mortar", "#0000FF", 3.2],
-  ["elephant: howdah tower", 0.75 * dotS, "elephant_howdah", "#0000FF",
-   3.4],
-  ["elephant: plain", 0.75 * dotS, "elephant_plain", "#0000FF", 3.4],
+  ["ram silhouette", 0.75 * dotS, "ram", "#0000FF", 3.2],
+  ["elephant (2 legs)", 0.75 * dotS, "elephant", "#0000FF", 3.4],
 ];
 // per-variant painters: fall back to a shared default if a row uses the
 // 4-arg shape of the table
@@ -141,13 +138,11 @@ const SHAPE_FN = {
   ship: (ctx, c) => SHIP_SHAPE(ctx, c || "#0000FF"),
   transport_sail: TRANSPORT_SHAPES.sail,
   transport_deck: TRANSPORT_SHAPES.deck,
-  siege_arm: SIEGE_SHAPES.arm,
-  siege_bolt: SIEGE_SHAPES.bolt,
+  siege_arm: SIEGE_SHAPE,
   cannon_barrel: CANNON_SHAPES.barrel,
   cannon_carriage: CANNON_SHAPES.carriage,
-  cannon_mortar: CANNON_SHAPES.mortar,
-  elephant_howdah: ELEPHANT_SHAPES.howdah,
-  elephant_plain: ELEPHANT_SHAPES.plain,
+  ram: RAM_SHAPE,
+  elephant: ELEPHANT_SHAPE,
 };
 const ur = document.getElementById("units");
 for (const [name, tiles, mode, colorOverride, boxMult] of UNITS) {
