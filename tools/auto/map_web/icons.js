@@ -438,35 +438,49 @@ const CANNON_SHAPES = {
 const CANNON_SHAPE = CANNON_SHAPES.barrel;
 
 /* Elephants. Side profile after the user's reference: rounded back,
- * big head dome, trunk curling under, 2 visible legs, tail. */
+ * big head with an ear fold, trunk hanging with a curled tip, 4 stubby
+ * legs, tail. */
 const elephantBody = (ctx, color) => {
   ctx.fillStyle = color;
   ctx.beginPath();
-  // one continuous outline: rump -> back -> head dome -> trunk -> legs
-  ctx.moveTo(2.2, 15.0);                          // rear base
-  ctx.quadraticCurveTo(1.8, 10.2, 6.0, 9.2);      // rump
-  ctx.quadraticCurveTo(11.0, 8.4, 14.6, 9.0);     // back
-  ctx.quadraticCurveTo(18.8, 9.0, 19.2, 12.2);    // head dome
-  ctx.quadraticCurveTo(22.6, 13.6, 21.6, 17.4);   // trunk outer curve
-  ctx.quadraticCurveTo(21.0, 18.8, 19.4, 17.8);   // trunk curls under
-  ctx.quadraticCurveTo(20.4, 15.8, 18.6, 13.0);   // trunk inner -> chin
-  ctx.lineTo(17.8, 13.6);                         // chest
-  ctx.lineTo(17.6, 19.8);                         // front leg
-  ctx.lineTo(15.2, 19.8);
-  ctx.lineTo(15.2, 14.6);
-  ctx.lineTo(5.4, 14.6);                          // belly
-  ctx.lineTo(5.4, 19.8);                          // rear leg
-  ctx.lineTo(3.0, 19.8);
+  // one continuous outline: rump -> back -> head -> trunk -> legs
+  ctx.moveTo(2.6, 14.6);                          // rear base
+  ctx.quadraticCurveTo(2.2, 10.4, 6.4, 9.6);      // rump
+  ctx.quadraticCurveTo(11.4, 8.8, 14.6, 9.2);     // back
+  ctx.quadraticCurveTo(17.6, 8.2, 20.0, 11.0);    // head dome
+  ctx.quadraticCurveTo(20.6, 12.0, 20.4, 13.0);   // face front
+  ctx.quadraticCurveTo(21.6, 15.2, 20.8, 17.2);   // trunk drops
+  ctx.quadraticCurveTo(20.4, 18.4, 19.2, 17.8);   // tip curls under
+  ctx.quadraticCurveTo(20.2, 15.8, 18.4, 13.4);   // trunk inner -> chin
+  ctx.lineTo(17.4, 14.2);                         // chest
+  ctx.lineTo(17.2, 19.9);                         // front leg
+  ctx.lineTo(15.2, 19.9);
+  ctx.lineTo(15.2, 14.2);
+  ctx.lineTo(13.8, 14.2);                         // leg 3
+  ctx.lineTo(13.8, 19.9);
+  ctx.lineTo(11.8, 19.9);
+  ctx.lineTo(11.8, 14.2);
+  ctx.lineTo(8.0, 14.2);                          // leg 2
+  ctx.lineTo(8.0, 19.9);
+  ctx.lineTo(6.0, 19.9);
+  ctx.lineTo(6.0, 14.2);
+  ctx.lineTo(4.6, 14.2);                          // rear leg
+  ctx.lineTo(4.6, 19.9);
+  ctx.lineTo(2.6, 19.9);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
+  ctx.beginPath();                                // ear fold
+  ctx.moveTo(16.2, 9.4);
+  ctx.quadraticCurveTo(18.6, 10.0, 18.0, 12.6);
+  ctx.stroke();
   ctx.fillStyle = "#fff";                         // eye
   ctx.beginPath();
-  ctx.arc(17.0, 10.6, 0.9, 0, 6.2832);
+  ctx.arc(19.0, 11.2, 0.8, 0, 6.2832);
   ctx.fill();
   ctx.beginPath();                                // tail
-  ctx.moveTo(2.2, 13.6);
-  ctx.lineTo(1.2, 16.6);
+  ctx.moveTo(2.6, 13.8);
+  ctx.lineTo(1.6, 16.4);
   ctx.stroke();
 };
 const ELEPHANT_SHAPE = elephantBody;
