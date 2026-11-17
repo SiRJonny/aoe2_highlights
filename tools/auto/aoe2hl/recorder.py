@@ -10,6 +10,7 @@ Thin CLI: tools/auto/record_events.py.
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -20,12 +21,109 @@ from aoe2hl import paths
 from aoe2hl import pipe as drive
 from aoe2hl import planner
 from aoe2hl import replays_ui
-from aoe2hl.annotators import annotate_orders, annotate_resigns
+from aoe2hl import nohud
+from aoe2hl.annotators import annotate_orders, annotate_resigns, parse_teams
+from aoe2hl import terrain
 from aoe2hl.capture import (close_control_panel, collect, fog_off, log,
-                            mux, record_segment, wait_first_tick)
+                            mux, record_segment, wait_first_tick,
+                            wait_seek_settled)
 
 PAN_MAX_GAP = 20.0     # max game-s between takes for a pan transition
 PAN_MAX_TILES = 40.0   # max tile distance for a pan transition
+
+
+def start_nohud_replay(row, search, touch):
+    """Restart AoE with a prepared local HUD-removal folder, then load replay.
+
+    Returns (pipe_handle, mod_status_backup). If startup fails after prepare,
+    restore profile state and remove the generated folder before raising.
+    """
+    import bootstrap_row as boot
+
+    profile_mods = Path(nohud.PROFILE_MODS_DIR)
+    boot.kill_game()
+    backup = nohud.prepare(profile_mods, nohud.GAME_WIDGETUI,
+                           mode="shrink", solo=True)
+    try:
+        # A crash report triggers the game's "mods disabled" prompt at boot.
+        subprocess.run(["taskkill", "/IM", "BsSndRpt64.exe", "/F"],
+                       capture_output=True)
+        logs_root = (Path.home() / "Games" /
+                     "Age of Empires 2 DE" / "logs")
+        for report in logs_root.glob("*/Age2CrashReport.txt"):
+            report.replace(report.with_suffix(".txt.parked"))
+
+        boot.touch_target(row or 1, touch)
+        boot.launch_game()
+        boot.wait_window()
+        boot.inject_and_verify()
+        if not start_replay(row, search):
+            log("WARNING: UI start reported failure; waiting for module")
+        time.sleep(4)
+        handle = drive.connect(120)
+        if not wait_first_tick(handle, 150):
+            game.save_debug("no_hud_no_tick")
+            raise RuntimeError("no-HUD replay produced no module tick")
+        close_control_panel()
+        fog_off()
+        if game.hit_anchor("replay_all_visible", threshold=0.86):
+            game.save_debug("no_hud_verification_failed")
+            raise RuntimeError(
+                "--no-hud requested, but replay HUD anchor remains visible")
+        log("no-HUD verification passed: replay HUD anchor absent")
+        return handle, backup
+    except BaseException:
+        boot.kill_game()
+        nohud.restore(profile_mods, backup)
+        nohud.remove_payload(profile_mods)
+        raise
+
+
+def overlay_payload(replay_path):
+    """Build the module's custom HUD config from a replay header."""
+    teams, players = {}, {}
+    if replay_path and Path(replay_path).is_file():
+        try:
+            teams = parse_teams(replay_path)
+        except Exception:
+            pass
+        try:
+            players = terrain.player_info(replay_path)
+        except Exception:
+            pass
+    if not teams:
+        teams = {pid: pid for pid in range(1, 9)}
+    palette = ["#0000FF", "#FF0000", "#00A91B", "#D6D61B",
+               "#7BEFF0", "#8A13F7", "#666666", "#FF9205"]
+    slot_palette = [None, "#0000FF", "#FF0000", "#D6D61B", "#00A91B",
+                    "#7BEFF0", "#8A13F7", "#666666", "#FF9205"]
+    colors = {}
+    for pid, info in players.items():
+        color_id = info.get("colorId")
+        if isinstance(color_id, int) and 0 <= color_id < len(palette):
+            colors[str(pid)] = palette[color_id]
+    for pid in range(1, 9):
+        colors.setdefault(str(pid), slot_palette[pid])
+    return {"action": "overlay", "enabled": True,
+            "teams": {str(pid): team for pid, team in teams.items()},
+            "colors": colors}
+
+
+def resolve_replay_path(row, search, touch):
+    """Find replay header source for overlay config, if available."""
+    if touch and Path(touch).is_file():
+        return Path(touch)
+    root = Path.home() / "Games" / "Age of Empires 2 DE"
+    files = [p for folder in root.glob("*/savegame")
+             for p in folder.glob("*.aoe2record")]
+    if search:
+        hits = [p for p in files if search.lower() in p.name.lower()]
+        if len(hits) == 1:
+            return hits[0]
+    if row:
+        wanted = f"hl{row} replay copy.aoe2record".lower()
+        return next((p for p in files if p.name.lower() == wanted), None)
+    return None
 
 
 
@@ -253,6 +351,7 @@ def record_plan(handle, plan, out_dir, fps, segs=None, reuse=False):
             log(f"muxed {out_path.name}")
         else:
             log(f"mux FAILED for {out_path.name}; video-only kept")
+    return handle
 
 
 def main():
@@ -287,10 +386,19 @@ def main():
                     help="record pass: keep the running session instead of "
                          "restarting the replay (wards off the seek-never-"
                          "retry flow for missed segments)")
+    ap.add_argument("--no-hud", action="store_true",
+                    help="record pass only: restart with optional HUD-removal "
+                         "mod; restore mods and remove payload after clips")
+    ap.add_argument("--overlay", action="store_true",
+                    help="record pass only: draw custom team counts and "
+                         "terrain minimap in the captured game frames")
     args = ap.parse_args()
 
     do_collect = args.collect or not (args.collect or args.record)
     do_record = args.record or not (args.collect or args.record)
+    if args.no_hud and args.reuse:
+        sys.exit("--no-hud cannot combine with --reuse; the game must reboot "
+                 "to load the HUD-removal mod")
 
     if args.tag is None and args.row is None:
         sys.exit("need --row N (profile mode) or --tag T (arbitrary game "
@@ -341,24 +449,53 @@ def main():
     else:
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
 
+    if args.no_hud and not do_record:
+        log("--no-hud ignored: no record pass requested")
     if do_record and plan.get("segments"):
         plan["tag"] = tag
         log("== pass 2: record segments (replay at normal speed)")
         segs = [int(x) for x in args.segs.split(",")] if args.segs else None
-        if args.reuse:
-            handle = drive.connect(30)
-        else:
-            if not start_replay(args.row, args.search):
-                log("WARNING: UI start reported failure; still waiting for "
-                    "the module pipe")
-            time.sleep(4)
-            handle = drive.connect(120)
-            if not wait_first_tick(handle, 150):
-                log("WARNING: module never streamed ticks; pipe may be "
-                    "dead (state screenshot will show)")
-                game.save_debug("warning_pipe_no_tick")
-        record_plan(handle, plan, out_dir, args.fps, segs=segs,
-                    reuse=args.reuse)
+        backup = None
+        handle = None
+        try:
+            if args.no_hud:
+                handle, backup = start_nohud_replay(
+                    args.row, args.search, args.touch)
+            elif args.reuse:
+                handle = drive.connect(30)
+            else:
+                if not start_replay(args.row, args.search):
+                    log("WARNING: UI start reported failure; still waiting "
+                        "for the module pipe")
+                time.sleep(4)
+                handle = drive.connect(120)
+                if not wait_first_tick(handle, 150):
+                    log("WARNING: module never streamed ticks; pipe may be "
+                        "dead (state screenshot will show)")
+                    game.save_debug("warning_pipe_no_tick")
+            if args.overlay:
+                replay_source = resolve_replay_path(
+                    args.row, args.search, args.touch)
+                payload = overlay_payload(replay_source)
+                drive.send(handle, payload)
+                log(f"custom overlay enabled for recording "
+                    f"(teams={len(payload['teams'])})")
+            handle = record_plan(handle, plan, out_dir, args.fps, segs=segs,
+                                 reuse=args.reuse)
+        finally:
+            if args.overlay and handle is not None:
+                try:
+                    drive.send(handle, {"action": "overlay",
+                                        "enabled": False})
+                    log("custom overlay disabled after recording")
+                except Exception as exc:
+                    log(f"could not disable custom overlay: {exc}")
+            if args.no_hud:
+                import bootstrap_row as boot
+                boot.kill_game()
+                if backup is not None:
+                    nohud.restore(nohud.PROFILE_MODS_DIR, backup)
+                    nohud.remove_payload(nohud.PROFILE_MODS_DIR)
 
 
 

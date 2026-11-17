@@ -160,6 +160,39 @@ Module lifecycle facts:
   rows are lost; the planner derives the first TC from done/tc_build rows and
   the builder from tc_build / vill_pos streams.
 
+## Optional HUD-less recording
+
+The recorder can hide AoE2's data-driven HUD while leaving world frames
+visible behind it. This was live-tested on build `101.103.57257`.
+
+    py -3.12 tools/auto/record_events.py --row 1 --no-hud
+    py -3.12 tools/auto/record_events.py --row 1 --no-hud --overlay
+
+- `--no-hud` affects pass 2 only and requires a game restart; it cannot be
+  combined with `--reuse`. It backs up `mod-status.json`, disables other
+  profile mods for clean frames, and writes byte-surgical, CRLF-preserving
+  widget panels under `mods/local/hl_nohud/`.
+- Do not write a synthetic `local//hl_nohud` status entry. The game crashes
+  at replay-session start when a hand-written entry carries widgetui payload.
+  Leave the entry absent; AoE2 self-registers the local folder at boot and
+  computes its own checksum. `nohud.prepare()` implements this safe path.
+- Before launch, the recorder parks `Age2CrashReport.txt` files as
+  `.txt.parked` and kills `BsSndRpt64.exe`; otherwise AoE2 may show its
+  post-crash “mods disabled” dialog.
+- After clips, cleanup kills the game, restores the exact status backup, and
+  deletes `mods/local/hl_nohud/`. Do not leave that generated folder behind:
+  AoE2 self-registers it on every boot, even if its status entry was disabled.
+- `--overlay` draws custom team villager totals and a coarse 16×16 terrain
+  minimap with owner-colored castle/Krepost/TC markers through the injected
+  Lua module's Render API. The overlay defaults off. Terrain uses simple
+  land/water/unknown colors, not the game's terrain textures.
+- The commandpanel replay-bar subtree was tested and crashed at replay load.
+  Standard shrink preserves the full panel tree and hides it; the recorder
+  may therefore be unable to click the replay “All Visible” fog toggle.
+- `noui` chat is inert during replay playback. Empty widget arrays also crash.
+  Panel generation reads the installed game files and edits only targeted
+  numbers, preserving original formatting to tolerate patch-specific schemas.
+
 ## Compatibility notes (current build)
 
 - Header broken in released `mgz` 1.8.51 for save versions 67.2/68.0 (build
@@ -280,6 +313,29 @@ from game start (villagers walk in; no camera following). Takes land in
 - Commands sent to a paused module never arrive (send after F3); `seek`
   cannot rewind (t < target only); one IPC connection per replay session;
   ReadFile without pending data blocks (Peek first).
+
+## Replay rewind research
+
+CaptureAge documents reverse playback at 0.5×–8× and timeline jumps only
+within the maximum game time already spectated. Its docs do not describe the
+reverse-playback implementation:
+
+- [CaptureAge Time Controls](https://captureage.com/cade/docs/cade-latest/time-controls)
+- [CaptureAge update notes](https://captureage.com/cade/updates) describe both
+  direct AoE2 replay integration and a separate CA:DE recording format.
+
+The public AoE2Control API exposes only `ReplaySpeed.SLOW`, `NORMAL`, `FAST`,
+and `FASTEST`; it has no reverse speed or replay-time setter. Our Lua seek
+chases forward by setting `FASTEST`, then pauses when `GetGameTime() >= target`.
+The recorder's `wait_seek_settled()` likewise waits for forward ticks. No
+public Control call can rewind the current AoE2 replay session.
+
+CaptureAge's exact method remains undocumented. True in-session reverse likely
+requires its own replay-state engine or substantial native integration; do
+not assume a negative `SetReplaySpeed` value works. A safe compatibility
+fallback is to reload the replay and fast-forward from its start to the target.
+That can revisit already-played time, but is a replay restart, not rewind, and
+costs the replay-chase duration.
 
 ## Out-folder hygiene
 

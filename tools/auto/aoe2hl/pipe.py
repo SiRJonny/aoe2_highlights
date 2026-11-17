@@ -6,6 +6,7 @@ Usage:
     py -3.12 -m aoe2hl.pipe camera --x 109 --y 117
     py -3.12 -m aoe2hl.pipe pause | unpause | speed --v 3
     py -3.12 -m aoe2hl.pipe watch --seconds 30   (print rows)
+    py -3.12 -m aoe2hl.pipe chat --text noui
 """
 import argparse
 import json
@@ -155,7 +156,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("action", choices=[
         "ping", "seek", "camera", "pause", "unpause", "speed", "watch",
-        "probe"])
+        "probe", "chat", "overlay"])
     ap.add_argument("--t", type=float, default=None)
     ap.add_argument("--x", type=float, default=None)
     ap.add_argument("--y", type=float, default=None)
@@ -166,6 +167,16 @@ def main():
                     help="probe: UnitObjectType id to inspect")
     ap.add_argument("--seconds", type=float, default=30,
                     help="watch: seconds to stream")
+    ap.add_argument("--text", default=None,
+                    help="chat: text to send (e.g. noui)")
+    ap.add_argument("--enable", action="store_true",
+                    help="overlay: enable custom HUD")
+    ap.add_argument("--disable", action="store_true",
+                    help="overlay: disable custom HUD")
+    ap.add_argument("--teams", default="",
+                    help="overlay: comma-separated player=team pairs")
+    ap.add_argument("--colors", default="",
+                    help="overlay: comma-separated player=#RRGGBB pairs")
     args = ap.parse_args()
 
     game.focus_window()
@@ -175,12 +186,34 @@ def main():
         read_for(handle, args.seconds)
         return
 
-    send(handle, {
+    payload = {
         "action": "set_speed" if args.action == "speed" else args.action,
         "t": args.t, "x": args.x, "y": args.y, "v": args.v,
         "speedName": args.speed_name,
         "unitType": args.unit_type,
-    })
+        "text": args.text,
+    }
+    if args.action == "overlay":
+        if args.enable and args.disable:
+            ap.error("--enable and --disable are mutually exclusive")
+        teams, colors = {}, {}
+        for token in filter(None, args.teams.split(",")):
+            try:
+                pid, team = token.split("=", 1)
+                teams[str(int(pid))] = int(team)
+            except ValueError:
+                ap.error(f"invalid --teams item: {token!r}")
+        for token in filter(None, args.colors.split(",")):
+            try:
+                pid, color = token.split("=", 1)
+                if not color.startswith("#") or len(color) not in (4, 7, 9):
+                    raise ValueError
+                colors[str(int(pid))] = color
+            except ValueError:
+                ap.error(f"invalid --colors item: {token!r}")
+        payload = {"action": "overlay", "enabled": args.enable
+                   and not args.disable, "teams": teams, "colors": colors}
+    send(handle, payload)
 
     # read the ack (and whatever comes meanwhile)
     read_for(handle, 8)

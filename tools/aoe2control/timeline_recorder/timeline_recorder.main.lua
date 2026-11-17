@@ -59,6 +59,8 @@
 --   {"action":"pause"} / {"action":"unpause"}
 --   {"action":"set_speed","v":0..3}      replay speed (ReplaySpeed enum)
 --   {"action":"restart"}                 DispatchRestartGame (replay/profile)
+--   {"action":"chat","text":"<string>"}  say <string> in game chat
+--       (SendChatMessage; works in replays — used for the "noui" UI toggle)
 --   {"action":"ping"}                    -> {"type":"pong",...}
 --
 -- Requires CONTROL settings: Modules See Everything = true so all players'
@@ -79,6 +81,21 @@ local militaryClasses = {} -- list of UnitClass ids counted as army
 local armyWarned = false
 local tcSeen = {}     -- completed TC/castle id -> {playerId, x, y, kind}
 local snapSent = false
+local overlay = {
+    enabled = false,
+    teams = {},
+    colors = {},
+    villagerCounts = {},
+    buildings = {},
+    terrainRows = {},
+    terrainRow = 1,
+    gridWidth = 16,
+    gridHeight = 16,
+    mapWidth = 0,
+    mapHeight = 0,
+    terrainPalette = nil,
+    errorLogged = false,
+}
 
 local houseTypes = {}     -- [unitType id] = true, built from UnitObjectType names
 local typeNames = {}      -- [unitType id] = name, filled with house ids at load
@@ -477,6 +494,28 @@ local function handleCommands()
                                   ok = ok, err = err })
                 end
             end
+        elseif action == "chat" and msg.text then
+            SendChatMessage(tostring(msg.text))
+            send("ack", { action = action, text = tostring(msg.text) })
+        elseif action == "overlay" then
+            overlay.enabled = msg.enabled == true
+            overlay.teams = msg.teams or {}
+            overlay.colors = {}
+            overlay.mapWidth = GetMapWidth() or 0
+            overlay.mapHeight = GetMapHeight() or 0
+            overlay.terrainRows = {}
+            overlay.terrainRow = 1
+            overlay.terrainPalette = {
+                L = Color(76, 112, 57),
+                W = Color(35, 78, 116),
+                ["?"] = Color(39, 43, 45),
+            }
+            for pid, hex in pairs(msg.colors or {}) do
+                if type(hex) == "string" then
+                    overlay.colors[tostring(pid)] = Color(hex)
+                end
+            end
+            send("ack", { action = action, enabled = overlay.enabled })
         elseif action == "restart" then
             DispatchRestartGame()
         elseif action == "probe" then
@@ -602,6 +641,45 @@ local function handleCommands()
             send("probe_result", body)
         elseif action == "ping" then
             send("pong", { })
+        end
+    end
+end
+
+local function sampleOverlayTerrain()
+    if not overlay.enabled
+        or overlay.terrainRow > overlay.gridHeight
+        or overlay.mapWidth <= 0 or overlay.mapHeight <= 0 then
+        return
+    end
+    local ok, err = pcall(function()
+        local gy = overlay.terrainRow
+        local row = {}
+        local y = math.min(overlay.mapHeight - 1,
+            math.floor((gy - 0.5) * overlay.mapHeight
+                       / overlay.gridHeight))
+        for gx = 1, overlay.gridWidth do
+            local x = math.min(overlay.mapWidth - 1,
+                math.floor((gx - 0.5) * overlay.mapWidth
+                           / overlay.gridWidth))
+            local tile = GetMapTile(x, y)
+            local kind = "?"
+            if tile then
+                local terrain = tile:GetTerrain()
+                if terrain ~= Terrain.UNKNOWN then
+                    kind = tile:IsNavigatable() and "L" or "W"
+                end
+            end
+            row[gx] = kind
+        end
+        overlay.terrainRows[gy] = row
+        overlay.terrainRow = gy + 1
+    end)
+    if not ok then
+        overlay.terrainRow = overlay.gridHeight + 1
+        if not overlay.errorLogged then
+            overlay.errorLogged = true
+            Log("timeline_recorder overlay terrain sampling failed: "
+                .. tostring(err))
         end
     end
 end
@@ -929,16 +1007,19 @@ local function sample()
     -- exact "eco count" per player
     local states = GetObjectStates(GetObjectsByClass(UnitClass.VILLAGER))
     local counts = {}
+    local villagerCounts = {}
     local now = {}
     for i = 1, #states.playerId do
         local pid = states.playerId[i]
         if pid and pid >= 0 then
             counts[pid] = (counts[pid] or 0) + 1
+            villagerCounts[pid] = (villagerCounts[pid] or 0) + 1
         end
         now[states.id[i]] = { x = states.x[i], y = states.y[i],
                               playerId = states.playerId[i],
                               unitType = states.unitType[i] }
     end
+    overlay.villagerCounts = villagerCounts
     pcall(function()
         local es = GetObjectStates(GetObjectsByClasses({
             UnitClass.FISHING_SHIP, UnitClass.TRADE_CART,
@@ -1026,6 +1107,7 @@ local function sample()
     trackBuildings()
     local milNow = sampleMilitary() or {}
     trackKeyBuildings()
+    overlay.buildings = tcSeen
     if mapMode then
         -- columnar full-object snapshot for the map animation: buildings
         -- (completed + foundations), villagers, military; player-owned
@@ -1211,6 +1293,7 @@ end
 
 function Update()
     handleCommands()
+    sampleOverlayTerrain()
 
     if pan then
         -- apply the camera tween every Update (render-smooth; game time
@@ -1260,6 +1343,93 @@ function Update()
 
     sample()
     runSeek()
+end
+
+function Render()
+    if not overlay.enabled then return end
+    local ok, err = pcall(function()
+        local screen = GetScreenSize()
+        if not screen or screen.x <= 0 then return end
+
+        local totals, firstPid = {}, {}
+        for pidText, teamValue in pairs(overlay.teams) do
+            local pid = tonumber(pidText)
+            local team = tonumber(teamValue) or pid
+            if pid and team then
+                totals[team] = 0
+                firstPid[team] = pid
+            end
+        end
+        for pid, count in pairs(overlay.villagerCounts) do
+            local teamValue = overlay.teams[tostring(pid)]
+                or overlay.teams[pid]
+            local team = tonumber(teamValue) or pid
+            totals[team] = (totals[team] or 0) + count
+            if firstPid[team] == nil or pid < firstPid[team] then
+                firstPid[team] = pid
+            end
+        end
+        local teams = {}
+        for team in pairs(totals) do teams[#teams + 1] = team end
+        table.sort(teams)
+        for i, team in ipairs(teams) do
+            local pid = firstPid[team]
+            local color = overlay.colors[tostring(pid)] or Color(255, 255, 255)
+            RenderText("Team " .. tostring(team) .. ": "
+                       .. tostring(totals[team]),
+                       Vector2(screen.x / 2, 18 + (i - 1) * 28),
+                       24, color, true)
+        end
+
+        local mapW, mapH = 224, 224
+        local mapX, mapY = screen.x - mapW - 18, screen.y - mapH - 18
+        if overlay.mapWidth > 0 and overlay.mapHeight > 0 then
+            RenderRectFilled(Vector2(mapX - 4, mapY - 4),
+                             Vector2(mapX + mapW + 4, mapY + mapH + 4),
+                             Color(10, 15, 18, 235), 0, 0)
+            local cellW, cellH = mapW / overlay.gridWidth,
+                                 mapH / overlay.gridHeight
+            for gy = 1, overlay.gridHeight do
+                local row = overlay.terrainRows[gy]
+                if row then
+                    local gx = 1
+                    while gx <= overlay.gridWidth do
+                        local kind = row[gx] or "?"
+                        local finish = gx + 1
+                        while finish <= overlay.gridWidth
+                            and (row[finish] or "?") == kind do
+                            finish = finish + 1
+                        end
+                        RenderRectFilled(
+                            Vector2(mapX + (gx - 1) * cellW,
+                                    mapY + (gy - 1) * cellH),
+                            Vector2(mapX + (finish - 1) * cellW,
+                                    mapY + gy * cellH),
+                            overlay.terrainPalette[kind], 0, 0)
+                        gx = finish
+                    end
+                end
+            end
+        end
+        for _, building in pairs(overlay.buildings) do
+            local kind = building.kind
+            if kind == "CASTLE" or kind == "KREPOST"
+                or kind == "TOWN_CENTER" then
+                local color = overlay.colors[
+                    tostring(building.playerId)] or Color(255, 255, 255)
+                local radius = kind == "TOWN_CENTER" and 3 or 5
+                if overlay.mapWidth > 0 and overlay.mapHeight > 0 then
+                    local x = mapX + building.x / overlay.mapWidth * mapW
+                    local y = mapY + building.y / overlay.mapHeight * mapH
+                    RenderCircleFilled(Vector2(x, y), radius, color, 12)
+                end
+            end
+        end
+    end)
+    if not ok and not overlay.errorLogged then
+        overlay.errorLogged = true
+        Log("timeline_recorder overlay Render failed: " .. tostring(err))
+    end
 end
 
 function End()

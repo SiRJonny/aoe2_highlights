@@ -662,6 +662,10 @@ def wait_first_tick(handle, timeout_s=120):
         rows = drive.read_for(handle, 3, quiet=True)
         if any(r.get("type") == "tick" for r in rows):
             return True
+        # read_for returns INSTANTLY on a dead pipe (its peek-loop
+        # breaks); without this sleep the outer loop busy-spins and
+        # floods the log with PIPE DEAD lines
+        time.sleep(0.2)
     return False
 
 def wait_seek_settled(handle, t0, max_s=300, progress=None, check_end=None):

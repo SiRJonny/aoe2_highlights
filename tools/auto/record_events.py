@@ -17,6 +17,8 @@ Usage:
     py -3.12 tools\\auto\\record_events.py --tag mp5 --touch <replay>
         [--collect] [--record]         (default: both passes)
         [--segs 1,2] [--fps 30] [--max-minutes 40]
+        [--no-hud]                      (record pass only; reboot required)
+        [--overlay]                     (custom counts + terrain minimap)
         [--events PATH] [--plan PATH] [--out-dir PATH]
 """
 import sys
