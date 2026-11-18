@@ -149,10 +149,19 @@ bar, score, command panel, chat, notifications) not drawn - world
       window-flip backtracking reaches ~27 kB of the full-state patch;
       full apiVersion-22 schema mining still OPEN (seed overrides in
       `docs/cade/schema_v22_overrides.json`; specs in `docs/cade/`).
+- [x] 13. Full-game archive + damage semantics pinned: `mp4_archive.xz`
+      (30926 frames, t 0-6661 s, whole 22-min 8-player MP game, 67 MB
+      xz) captured with the fixed resubscribe-on-deadline stream loop
+      (`cade_record.py`); `cade_events.py` decode finalized - damage =
+      {source_id, target_id, amount, hp_after (victim HP after the
+      hit), counter}; chat taunt -1 when absent; NO entity_killed
+      events exist in v22 (kills must come from the state model).
 - [ ] 12. Later: per-player takes via `SetPerspective`; Oracle stream
       (modal dismissal); ChangeScreen/ChangeWindowState/SetDesiredGame
       probes; archive-first pipeline (pass 1 = archive, planner reads
-      archive events); pin Damage/Notification field semantics.
+      archive events: damage windows = battles, train/research done =
+      exact timings); finish v22 state-model mining for kill
+      detection.
 
 
 ## Notes

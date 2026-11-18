@@ -104,34 +104,49 @@ def main():
     t0 = time.time()
     quiet_last = time.time()
     comp = lzma.LZMAFile(open(out, "wb"), "wb", preset=6)
+    import grpc
+
+    def finish(reason):
+        log(reason)
+        raise SystemExit
+
     try:
-        for seq in c.frames_raw(b"", timeout=max(60.0, args.quiet_seconds * 3)):
-            now = time.time()
-            if now - quiet_last > args.quiet_seconds:
-                log(f"stream quiet > {args.quiet_seconds}s => replay end")
+        idle_deadlines = 0
+        while True:
+            got_frames_here = 0
+            try:
+                stream = c.frames_raw(
+                    b"", timeout=args.quiet_seconds + 10)
+                for seq in stream:
+                    now = time.time()
+                    quiet_last = now
+                    idle_deadlines = 0
+                    msg = struct.pack("<I", len(seq)) + seq
+                    comp.write(msg)
+                    bytes_raw += len(msg)
+                    n_seq += 1
+                    for t, patch, rev, nev, ncmd in cade.iter_frames(seq):
+                        n_frame += 1
+                        got_frames_here += 1
+                        if n_frame % 25 == 0:
+                            samples.append((now, t))
+                    if now - t0 > args.max_seconds:
+                        log(f"max-seconds {args.max_seconds} reached")
+                        raise StopIteration
+            except StopIteration:
                 break
-            quiet_last = now
-            msg = struct.pack("<I", len(seq)) + seq
-            comp.write(msg)
-            bytes_raw += len(msg)
-            n_seq += 1
-            fcount = 0
-            for t, patch, rev, nev, ncmd in cade.iter_frames(seq):
-                n_frame += 1
-                fcount += 1
-                if n_frame % 25 == 0:
-                    samples.append((now, t))
-            if fcount:
-                quiet_last = now
-            if now - t0 > args.max_seconds:
-                log(f"max-seconds {args.max_seconds} reached")
-                break
-    except grpc.RpcError as e:
-        if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
-            log(f"stream deadline after {n_frame} frames "
-                f"(treated as replay end)")
-        else:
-            raise
+            except grpc.RpcError as e:
+                if e.code() != grpc.StatusCode.DEADLINE_EXCEEDED:
+                    raise
+                # no message for quiet_seconds+10: replay ended, OR the
+                # stream needs a re-subscribe (the RPC deadline is the
+                # whole call). Two idle rounds in a row => end.
+                idle_deadlines += 1
+                log(f"stream idle ({idle_deadlines} rounds, "
+                    f"{n_frame} frames so far)")
+                if idle_deadlines >= 2:
+                    log("stream quiet => replay end")
+                    break
     except KeyboardInterrupt:
         log("interrupted")
     finally:

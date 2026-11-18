@@ -467,16 +467,28 @@ on both archives:
 - MP archive (20029 frames, t 0-1549 s): 81 damage, 59 train-done,
   4 research-done, 4 player_chat (real chat text + taunt numbers
   decoded, e.g. `{"player_id": 1, "text": "7: ( Ahh )", "taunt": 7}`).
+- Full-game archive (`mp4_archive.xz`, 30926 frames, t 0-6661 s, a
+  22-minute 8-player MP game): 1379 damage, 127 train-done,
+  35 research-done, 16 chat, market transactions with exact resource
+  values, combat notification sounds.
 
-Event semantics (v22): player ids are 1-8, object ids live around
-25-300k, tech ids small. Known layouts: EntityKilled {id, killer_id},
-Tribute {sender, receiver, attribute, values...}, PlayerChat {player,
-comm, channel, text, taunt}, CombatNotificationSound {receiver, type,
-target}. Damage / MonkConversion / Notification* are decoded
-generically (f1..fN) - their exact field meanings still need pinning
-(damage f3 looks like the amount, train_done f1 = player, f4 = object
-id). Commands are kept raw (`--commands`) - the v22 Command oneof
-numbering differs from the public 2021 proto.
+Event semantics (v22, empirically pinned on the mp4 archive): player
+ids are 1-8, object ids live in the 14k-300k range, tech ids small.
+- `damage`: {source_id, target_id, amount (float), hp_after (float),
+  f5, counter (negative int64), flag} - hp_after is the victim's HP
+  AFTER the hit (verified: it drains by the amount on every repeat),
+  which makes this a complete combat log for battle detection.
+- `player_chat`: {player_id, comm_player_id, channel, text, taunt};
+  taunt is -1 when the message is not a taunt; real chat text decodes.
+- `notification_train_done`: {player_id, unit_type, f3, object_id}.
+- `notification_research_done`: {player_id, tech_id, object_id}.
+- `market_transaction` / `tribute` / `combat_notification_sound`
+  match the public proto layouts.
+- NO `entity_killed` events appear in a full 22-minute game (the 2021
+  proto's field 1 never fires) - kills are presumably derived by CA
+  from state (entity removal), so kill detection needs the state model.
+- Commands are kept raw (`--commands`) - the v22 Command oneof
+  numbering differs from the public 2021 proto.
 
 This stream is exact per-tick data sampled by the ENGINE - strictly
 better than the Lua module's polling heuristics for highlight

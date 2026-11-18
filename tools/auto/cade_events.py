@@ -42,12 +42,26 @@ EVENT_FIELDS = {
                     4: "text", 5: "taunt"},
     "combat_notification_sound": {1: "receiver_id", 2: "type",
                                   3: "attacked_object_id"},
+    # v22: pinned empirically from the mp4 archive - f4 is the victim's
+    # HP AFTER the hit (drains by the amount on every repeat)
+    "damage": {1: "source_id", 2: "target_id", 3: "amount",
+               4: "hp_after", 5: "f5", 6: "counter", 7: "flag"},
+    "notification_train_done": {1: "player_id", 2: "unit_type",
+                                3: "f3", 4: "object_id"},
+    "notification_research_done": {1: "player_id", 2: "tech_id",
+                                   3: "object_id"},
 }
 
 
 def decode_value(wt: int, raw: bytes):
     if wt == 0:
-        return int.from_bytes(raw, "little", signed=True)
+        v = int.from_bytes(raw, "little", signed=False)
+        if len(raw) > 9:
+            # 10-byte varints carry negative int64 two's complement
+            v &= (1 << 64) - 1
+            if v >= 1 << 63:
+                v -= 1 << 64
+        return v
     if wt == 1:
         import struct as _s
         return _s.unpack("<d", raw)[0]
