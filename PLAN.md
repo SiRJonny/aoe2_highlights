@@ -120,6 +120,30 @@ bar, score, command panel, chat, notifications) not drawn - world
       rewind path found. Safe revisit fallback: reload, then fast-forward
       from start; this is not true rewind. Details and official links in
       `docs/replay-format-notes.md`.
+- [x] 9. CadeRemote probe (game's built-in CaptureAge gRPC API, port
+      4341 mTLS): built `tools/auto/aoe2hl/cade.py` (schema-free client,
+      certs from LibreMatch) + `tools/auto/probe_cade.py`. LIVE
+      VERIFIED: server runs from the main menu; Info (apiVersion 22);
+      SetFogOfWar toggles the game-window fog (screenshot-verified);
+      SetPerspective switches POV instantly; SetGameSpeed enum
+      SLOW/NORMAL/FAST/FASTEST measured 0.83/1.68/5.95/6.26 game-s/s;
+      LoadGame{LoadReplay.filePath} loads/restarts/switches replays with
+      no UI driving (same-rec restart ~1-2 s); Pause works; Frames
+      stream = full-state catch-up patch (~22 MB) + 8-17 KB per-tick
+      deltas, time in ms, no reverse patches, streaming slows the sim.
+      RestartAsReplay refused (status 9). Findings in
+      `docs/replay-format-notes.md` ("CadeRemote" section).
+- [ ] 10. Recorder integration behind `--cade`: replace
+      replay-row UI driving with `LoadGame{LoadReplay}`, replace F3 /
+      speed settle with `Pause`/`SetGameSpeed`, add `SetFogOfWar`
+      (fog-off capture without the commandpanel workaround), optional
+      `SetPerspective` for per-player takes. Keep CONTROL module only
+      for the exact-time seek + event ticks. Smoke-validate one clip.
+- [ ] 11. Rewind option B: Frames-stream archive during chases; Python
+      patch applier + state model (spec: uncage model.rs/patcher.rs) to
+      reconstruct per-tick state for highlight detection and HUD data;
+      evaluate reverse playback via own renderer later.
+
 
 ## Notes
 

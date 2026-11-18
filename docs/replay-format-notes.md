@@ -337,6 +337,89 @@ fallback is to reload the replay and fast-forward from its start to the target.
 That can revisit already-played time, but is a replay restart, not rewind, and
 costs the replay-chase duration.
 
+## CadeRemote: the game's built-in CaptureAge gRPC API (LIVE-VERIFIED)
+
+The game client runs a gRPC server itself. Found via strings in
+`AoE2DE_s.exe` (build 101.103.57257 #188329): `localhost:4341`,
+"Failed to start CaptureAge Api server. Is something already running on
+port 4341?" and full method table `/cade_api.rpc.CadeRemote/*`. TLS:
+server cert `CN=ca-game-api,O=CaptureAge BV` (embedded in the exe,
+offset 0x3318810), signed by `CN=CaptureAge Root Certificate,O=CaptureAge
+BV`. Clients must present the `cade-client` certificate (public in
+github.com/librematch/delta-play-replay `crates/uncage-client/cert/`,
+copies in `tools/auto/aoe2hl/certs/`). Public protocol RE: LibreMatch
+docs (librematch.github.io/wiki/grpc); AGPL - protocol knowledge only.
+
+- **Listener**: starts by the main menu already (before any replay);
+  binds `127.0.0.1:4341` and `[::1]:4341`.
+- `Info()` → `gameVersion` 188329, `apiVersion` 22 (LibreMatch proto
+  documented apiVersion ~1; v22 is bigger: extra events Damage,
+  MonkConversion, NotificationTrainDone/ResearchDone/FarmOrFishTrapDied/
+  Wonder; extra commands; extra RPCs), base/user directory, enabled and
+  disabled mod directories, language, one nested status msg.
+- `Pause(bool)` → `{success, changed}`; pauses/unpauses the replay.
+- `SetFogOfWar(bool)` → `{success, changed}`; `false` reveals
+  everything (minimap + world, "All Visible" effect), `true` restores.
+  Visually verified on the game window; resets on replay reload.
+- `SetPerspective(int playerId)` → switches the spectator POV
+  instantly (verified: player 2's resources/minimap/vision).
+- `SetGameSpeed(varint 0..3)` = ReplaySpeed SLOW/NORMAL/FAST/FASTEST.
+  Measured playback rates (game-s per wall-s): ~0.83 / 1.68 / 5.95 /
+  6.26. Float/double encodings on field 1 do NOT set the speed.
+- `LoadGame(oneof)` → oneof `2 = LoadReplay { string filePath = 1 }`
+  with the FULL `.aoe2record` path loads a replay: works from the main
+  menu AND from inside another replay (re-switch ~4 s incl. load; same-
+  replay restart ~1-2 s to first ticks). `1 = SpectateLobby` answered
+  status enum 8 offline; `3 = RestartAsReplay` answered status enum 9
+  (refused, empty submessage); `4 = Cancel` ends the current replay
+  (observed auto-restart afterwards). Success responses are EMPTY
+  bytes; failures carry a status varint.
+- `Frames(stream)` → `FrameSequence{Frame{time ms, patch bytes, events,
+  commands}}`. First sequence after subscribing contains one ~22 MB
+  full-state patch (catch-up), then per-tick deltas of 8–17 KB. `time`
+  is game world time in MILLISECONDS (matches the HUD clock). No
+  frames while paused. Reverse patches are NOT emitted (probed bool
+  fields 4–8 of FramesRequest; all empty). Streaming costs sim
+  performance: with a naive Python consumer the FASTEST chase dropped
+  to ~2.2× (vs 6.26× without); CA-style resolution/particle filtering
+  (`FramesRequest`) did not reduce volume for us.
+- `AccessFlag()` → `{1:1, 2:1}` (meaning unknown, harmless).
+- Not yet probed: `Oracle` (bidi stream: modals `ClickModal`, observer
+  lobby info, `GamePaused`, `GameChat`), `ChangeScreen`,
+  `ChangeWindowState` (`hwnd`), `SetDesiredGame` (queued game launch).
+
+Consequence for the pipeline (replacements, all RPC-driven):
+
+| Old mechanism | CadeRemote replacement |
+| --- | --- |
+| pyautogui replay-row clicks (`replays_ui.load`) | `LoadGame{LoadReplay.filePath}` |
+| F3 pause / speed hotkeys / settle dance | `Pause` + `SetGameSpeed` |
+| Watch-Player hotkeys per take | `SetPerspective(playerId)` |
+| Replay-bar "All Visible" fog checkbox (and the whole `commandpanel` shrink workaround needed to reach it) | `SetFogOfWar(false)` |
+| ~40 s UI restart between takes | `LoadReplay(same path)` ~1–2 s |
+
+Rewind status after the probe:
+
+- `RestartAsReplay` exists but was refused (status 9) for a replay that
+  was loaded via `LoadReplay`; empty-message guesses all failed.
+- There is NO RPC to set replay time; the engine cannot seek back.
+  CaptureAge's rewind is its own state machine: the Frames stream
+  (state deltas + events + commands) is applied in CA's own model and
+  renderer; `.caderec` = recorded Frames stream (delta-based), which is
+  why CA Pro can jump anywhere / reverse without the game.
+- Our path to the same capability (option B): record the Frames stream
+  during a FASTEST chase (measured ~26 MB xz per wall-minute at
+  FASTEST; ~22 MB initial full-state patch), then either (a) keep it as
+  an exact per-tick event/state archive for highlight detection and
+  HUD data, or (b) implement the state model (spec: uncage
+  `model.rs`/`patcher.rs`) to reconstruct state at any cached time.
+  Visual reverse playback would additionally need our own renderer -
+  out of scope for now.
+- Practical "rewind to earlier time" for re-takes TODAY: reload the
+  same replay via RPC (~1-2 s), `SetGameSpeed(FASTEST)`, chase with the
+  existing CONTROL-module seek to the exact target.
+
+
 ## Out-folder hygiene
 
 `out/` root holds ONLY final videos (`highlights_<tag>.mp4`). Everything else
