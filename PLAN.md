@@ -142,15 +142,17 @@ bar, score, command panel, chat, notifications) not drawn - world
 - [ ] 11. Rewind option B (in progress): `cade_record.py` archives the
       Frames stream (~26 MB xz/wall-min at FASTEST) with module-clock
       alignment; `analyze_cade_frames.py` + `analyze_clock_align.py`
-      done; `cadestate.py` delta applier + registry parser built and
-      working structurally, but full apiVersion-22 schema mining is
-      OPEN (2021 model spec lags: appended fields + changed scalar
-      sizes; DFS miner resolves the first ~1.1 kB of the full-state
-      patch, then hits a known-field drift). Seed overrides in
-      `docs/cade/schema_v22_overrides.json`; specs in `docs/cade/`.
+      done; WORKING: `cade_events.py` extracts the exact per-tick event
+      stream from archives without any state model (damage, kills,
+      tributes, train/research-done, chat w/ text - verified on both
+      archives). `cadestate.py` delta applier + registry parser built;
+      window-flip backtracking reaches ~27 kB of the full-state patch;
+      full apiVersion-22 schema mining still OPEN (seed overrides in
+      `docs/cade/schema_v22_overrides.json`; specs in `docs/cade/`).
 - [ ] 12. Later: per-player takes via `SetPerspective`; Oracle stream
       (modal dismissal); ChangeScreen/ChangeWindowState/SetDesiredGame
-      probes; Frames-driven HUD data + highlight detection.
+      probes; archive-first pipeline (pass 1 = archive, planner reads
+      archive events); pin Damage/Notification field semantics.
 
 
 ## Notes

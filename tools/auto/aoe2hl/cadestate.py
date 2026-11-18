@@ -151,6 +151,13 @@ def _field_def(idx: int, name: str, rtype: str) -> FieldDef:
 
 # ------------------------------------------------------------------ reader
 
+def _cur_size(label):
+    """Stream size of a scalar label; None for dynamic (String)."""
+    if label == "ref":
+        return 4
+    return _SIZE_BYTES.get(label)
+
+
 class Reader:
     __slots__ = ("buf", "pos")
 
@@ -247,6 +254,9 @@ class State:
         self._pending: list[FieldDef] = []
         self.parse_only = False
         self._widen_tried: dict = {}
+        self._window: deque = deque(maxlen=96)
+        self._win_tried: dict = {}
+        self._resume_off = 0
         self.stats = {"retries": 0, "guesses": 0, "patches": 0}
 
     # -- schema ----------------------------------------------------------
@@ -387,13 +397,17 @@ class State:
             node[1][fdef.index] = v
         return v
 
-    def _read_unknown(self, r: Reader, node: list, fdef: FieldDef):
+    def _read_unknown(self, r: Reader, node: list, fdef: FieldDef,
+                      instr_off: int | None = None):
         """Read an unknown scalar; size chosen by deep lookahead scoring."""
-        return self._decide(r, node, fdef, is_key=False)
+        return self._decide(r, node, fdef, is_key=False,
+                            instr_off=instr_off)
 
-    def _read_map_or_value(self, r: Reader, node: list, fdef: FieldDef):
+    def _read_map_or_value(self, r: Reader, node: list, fdef: FieldDef,
+                           instr_off: int | None = None):
         """AssignKey on a learned container: ref id or scalar."""
-        return self._decide(r, node, fdef, is_key=True)
+        return self._decide(r, node, fdef, is_key=True,
+                            instr_off=instr_off)
 
     # -- deep-lookahead decision ------------------------------------------
     def _stack_types(self) -> list[int]:
@@ -569,9 +583,12 @@ class State:
             self._name2id = mid
         return mid.get(name, -1)
 
-    def _decide(self, r: Reader, node: list, fdef: FieldDef, is_key: bool):
+    def _decide(self, r: Reader, node: list, fdef: FieldDef, is_key: bool,
+                instr_off: int | None = None):
         """Pick the encoding of an unknown field by deep lookahead."""
         start = r.pos
+        if instr_off is None:
+            instr_off = start - (6 if is_key else 2)
         types = self._stack_types()
         if is_key:
             cands = [("ref", 4)]
@@ -614,7 +631,7 @@ class State:
         _sc, label, consume = best
         labels_all = [l for l, _s in cands]
         self._choices.append((fdef, label, labels_all, len(self._undo),
-                              len(self.stack), start))
+                              len(self.stack), instr_off))
         self.stats["guesses"] += 1
         if fdef.avoid is None:
             fdef.avoid = set()
@@ -632,12 +649,18 @@ class State:
         return self._read_value(r, label)
 
     # -- patch ------------------------------------------------------------
-    def _run(self, patch: bytes, cap: int) -> None:
-        """One patch pass with DFS backtracking over unknown-field encodings.
+    _SIZE_CYCLE = ("Int32", "Int64", "Int16", "UInt8", "String")
 
-        Backtracking resumes AT the flipped choice (the undo log restores
-        the structural state to that point), so a flip costs only the
-        suffix re-parse, not a full restart."""
+    def _run(self, patch: bytes, cap: int) -> None:
+        """One patch pass with DFS backtracking over field encodings.
+
+        Two flip sources, both resuming AT the flipped instruction (the
+        undo log restores the structural state, so a flip costs only the
+        suffix re-parse):
+        - unknown-field choices recorded by _decide;
+        - a bounded window of recent scalar assignments (v22 changed some
+          2021 scalar sizes, so registry-known fields may need re-typing
+          even though they never open a choice on their own)."""
         start_depth = len(self.stack)
         self.stats["patches"] += 1
         pre_learned = set(self.learned)
@@ -645,9 +668,13 @@ class State:
         restarts = 0
         off = 0
         while True:
-            self._undo.clear()
-            self._choices.clear()
-            del self.stack[start_depth:]
+            if off == 0:
+                # full (re)start: wipe speculative state; on resume the
+                # undo log / window / stack prefix stay valid
+                self._undo.clear()
+                self._choices.clear()
+                self._window.clear()
+                del self.stack[start_depth:]
             try:
                 self._apply(patch, off)
                 for fd in self._pending:
@@ -673,6 +700,7 @@ class State:
                         while len(self._undo) > ulen:
                             self._undo_one()
                         del self.stack[slen:]
+                        self._prune_window()
                         off = coff
                         flipped = True
                         break
@@ -682,17 +710,12 @@ class State:
                                                             "list_value") \
                         else None
                 if not flipped:
-                    # nothing left inside this patch: first try re-typing
-                    # the field of the last instruction (v22 may have
-                    # changed a 2021 scalar's size), then unlearn+restart
-                    m = re.search(r"offset (\d+)", str(e))
-                    fail_off = int(m.group(1)) if m else -1
-                    if fail_off >= 0 and self._widen_last(fail_off):
-                        self._rollback(start_depth)
-                        self.stats["retries"] += 1
-                        retries += 1
-                        off = 0
+                    if self._flip_window(off):
+                        off = self._resume_off
                         continue
+                    # window exhausted: unlearn the fields this patch
+                    # taught us and restart (avoid sets on surviving
+                    # schema entries steer the next combination)
                     self._rollback(start_depth)
                     unlearned = 0
                     for key in [k for k in list(self.learned)
@@ -711,34 +734,62 @@ class State:
                     retries += 1
                     off = 0
 
-    def _widen_last(self, fail_off: int) -> bool:
-        """Re-type the last instruction's field so it ends exactly at
-        fail_off (the v22 schema changed some 2021 scalar sizes)."""
-        li = getattr(self, "_last_instr", None)
-        if not li:
+    def _prune_window(self) -> None:
+        """Drop window entries invalidated by a rollback."""
+        keep = deque()
+        ulen = len(self._undo)
+        for entry in self._window:
+            if entry[5] <= ulen:
+                keep.append(entry)
+        self._window.clear()
+        self._window.extend(keep)
+
+    def _flip_window(self, fail_off: int) -> bool:
+        """Re-type a recent windowed scalar assignment; prefer the
+        instruction whose END lands nearest the failure offset (its size
+        is what pushed the stream off the rails). Sets self._resume_off
+        and returns True when a flip was made."""
+        best = None
+        for i in range(len(self._window) - 1, -1, -1):
+            off, action, field, mt, cur_label, ulen, slen = self._window[i]
+            key = (mt, field)
+            tried = self._win_tried.setdefault((key, off), {cur_label})
+            cands = self._SIZE_CYCLE if action == ASSIGN_FIELD \
+                else ("ref",) + self._SIZE_CYCLE
+            nxt = None
+            for label in cands:
+                if label in tried:
+                    continue
+                if label != "String" and label != "ref" \
+                        and _cur_size(cur_label) is not None \
+                        and _cur_size(label) == _cur_size(cur_label):
+                    continue     # same stream size: parse-identical
+                nxt = label
+                break
+            if nxt is not None:
+                best = (i, off, action, field, mt, cur_label, nxt,
+                        ulen, slen, key)
+                break
+        if best is None:
             return False
-        off, action, field, mt = li
-        key = (mt, field)
-        pair = (key, fail_off)
-        if pair in getattr(self, "_widen_done", set()):
-            return False
-        if action == ASSIGN_FIELD:
-            vsize = fail_off - off - 2
-        elif action == ASSIGN_KEY:
-            vsize = fail_off - off - 6
-        else:
-            return False
-        if vsize not in (1, 2, 4, 8):
-            return False
-        ftype = {1: "UInt8", 2: "Int16", 4: "Int32", 8: "Int64"}[vsize]
-        fd2 = FieldDef(field, f"w{field}_{ftype}", "value", ftype=ftype)
+        i, off, action, field, mt, cur_label, nxt, ulen, slen, key = best
+        self._win_tried[(key, off)].add(nxt)
+        fd2 = FieldDef(field, f"w{field}_{nxt}",
+                       "map_ref" if nxt == "ref" else
+                       ("list_value" if action == ASSIGN_KEY else "value"),
+                       ftype=None if nxt == "ref" else nxt)
         self.schema[key] = fd2
         self.learned[key] = fd2
-        if not hasattr(self, "_widen_done"):
-            self._widen_done = set()
-        self._widen_done.add(pair)
-        print(f"  widen model{mt} f{field}: value size -> {vsize} "
-              f"({ftype}) (instr @ {off}, fail @ {fail_off})")
+        self.stats["retries"] += 1
+        while len(self._undo) > ulen:
+            self._undo_one()
+        del self.stack[slen:]
+        del self._window[i]
+        self._prune_window()
+        if self.trace_enabled:
+            print(f"  window-flip @{off} model{mt} f{field} "
+                  f"{cur_label} -> {nxt} (fail @{fail_off})")
+        self._resume_off = off
         return True
 
     def _undo_one(self) -> None:
@@ -813,15 +864,17 @@ class State:
             elif action == ASSIGN_FIELD:
                 field = r.u8()
                 node = self.top()
-                self._last_instr = (off, action, field, node[0])
                 fdef = self._resolve(node, field, action)
                 if fdef.kind != "value":
                     raise ValueError(
                         f"AssignField on {fdef.kind} field {fdef.name}")
                 if fdef.ftype == "Unknown":
-                    val = self._read_unknown(r, node, fdef)
+                    val = self._read_unknown(r, node, fdef, instr_off=off)
                 else:
                     val = self._read_value(r, fdef.ftype)
+                self._window.append((off, action, field, node[0],
+                                     fdef.ftype, len(self._undo),
+                                     len(self.stack)))
                 if not self.parse_only:
                     self._fset(node, field, val)
             elif action == PUSH_FIELD:
@@ -859,8 +912,12 @@ class State:
                 field = r.u8()
                 key = r.i32()
                 node = self.top()
-                self._last_instr = (off, action, field, node[0])
                 fdef = self._resolve(node, field, action)
+                cur_label = "ref" if fdef.kind == "map_ref" \
+                    else (fdef.ftype or "Unknown")
+                self._window.append((off, action, field, node[0],
+                                     cur_label, len(self._undo),
+                                     len(self.stack)))
                 if fdef.kind in ("map_ref", "list_value") \
                         and fdef.cands and fdef.cands[0] in ("map_ref",
                                                              "list_value") \
@@ -868,7 +925,8 @@ class State:
                         and fdef.name.startswith("?"):
                     # undecided container: choice between ref map and
                     # scalar list/map
-                    kind, val = self._read_map_or_value(r, node, fdef)
+                    kind, val = self._read_map_or_value(r, node, fdef,
+                                                        instr_off=off)
                     cont = self._field_container(node, fdef, True)
                     if isinstance(cont, dict) and kind == "ref":
                         self._dset(cont, key, val)
@@ -879,7 +937,7 @@ class State:
                     continue
                 cont = self._field_container(node, fdef, True)
                 if fdef.kind == "list_value":
-                    val = (self._read_unknown(r, node, fdef)
+                    val = (self._read_unknown(r, node, fdef, instr_off=off)
                            if fdef.ftype == "Unknown"
                            else self._read_value(r, fdef.ftype))
                     if not self.parse_only:
@@ -944,7 +1002,7 @@ class State:
                         f"Insert on {fdef.kind} field {fdef.name}")
                 cont = self._field_container(node, fdef, True)
                 if fdef.kind == "list_value":
-                    val = (self._read_unknown(r, node, fdef)
+                    val = (self._read_unknown(r, node, fdef, instr_off=off)
                            if fdef.ftype == "Unknown"
                            else self._read_value(r, fdef.ftype))
                     if not self.parse_only:

@@ -456,6 +456,34 @@ Frame.time/1000 for all replays - least-squares over aligned pairs gave
 (`tools/auto/analyze_clock_align.py`) before mapping plan times onto
 archive times.
 
+## Archive event stream (no state model needed) - WORKING
+
+`tools/auto/cade_events.py` decodes the per-tick Event oneof directly
+from an archive into JSONL (`kind`, `t_ms`, decoded fields). Verified
+on both archives:
+
+- SP archive (12068 frames, t 0-696 s): 267 damage, 59 train-done,
+  7 research-done events.
+- MP archive (20029 frames, t 0-1549 s): 81 damage, 59 train-done,
+  4 research-done, 4 player_chat (real chat text + taunt numbers
+  decoded, e.g. `{"player_id": 1, "text": "7: ( Ahh )", "taunt": 7}`).
+
+Event semantics (v22): player ids are 1-8, object ids live around
+25-300k, tech ids small. Known layouts: EntityKilled {id, killer_id},
+Tribute {sender, receiver, attribute, values...}, PlayerChat {player,
+comm, channel, text, taunt}, CombatNotificationSound {receiver, type,
+target}. Damage / MonkConversion / Notification* are decoded
+generically (f1..fN) - their exact field meanings still need pinning
+(damage f3 looks like the amount, train_done f1 = player, f4 = object
+id). Commands are kept raw (`--commands`) - the v22 Command oneof
+numbering differs from the public 2021 proto.
+
+This stream is exact per-tick data sampled by the ENGINE - strictly
+better than the Lua module's polling heuristics for highlight
+detection. Planned endgame: pass 1 becomes an archive run
+(`cade_record.py`), the planner consumes archive events, pass 2 maps
+plan times onto the archive via the fitted clock.
+
 
 ## Out-folder hygiene
 
