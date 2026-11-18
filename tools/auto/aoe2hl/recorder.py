@@ -130,14 +130,22 @@ def resolve_replay_path(row, search, touch):
 def reload_session(tag_row=1):
     """Fresh replay load for grid takes: each take covers the SAME game
     span, so every player (the first included) gets the replay restarted.
-    The game is PAUSED right after the match starts (single F3 — the
-    leftover replay speed would otherwise eat the phase's opening while
-    the pipeline arms; the fresh load auto-plays at the previous
-    session's speed). The record_segment prelude unpauses."""
+    The game is PAUSED right after the match starts (CadeRemote Pause in
+    --cade mode, else a single F3 — the leftover replay speed would
+    otherwise eat the phase's opening while the pipeline arms; the fresh
+    load auto-plays at the previous session's speed). The record_segment
+    prelude unpauses."""
     if not start_replay(tag_row, None):
         log("  WARNING: grid reload UI start reported failure")
     game.focus_window()
-    game.pyautogui.press("f3")          # pause the just-started match
+    from aoe2hl import cadeui
+    if cadeui.enabled():
+        if drive.connect(30) is not None and cadeui.pause(True):
+            time.sleep(2)
+        else:
+            game.pyautogui.press("f3")   # RPC pause failed; F3 fallback
+    else:
+        game.pyautogui.press("f3")       # pause the just-started match
     time.sleep(4)
     h = drive.connect(120)
     close_control_panel()
@@ -392,6 +400,11 @@ def main():
     ap.add_argument("--overlay", action="store_true",
                     help="record pass only: draw custom team counts and "
                          "terrain minimap in the captured game frames")
+    ap.add_argument("--cade", action="store_true",
+                    help="drive the game's built-in CadeRemote gRPC API "
+                         "(port 4341): replay load/pause/fog via RPC "
+                         "instead of pyautogui; falls back to UI driving "
+                         "on RPC failure")
     args = ap.parse_args()
 
     do_collect = args.collect or not (args.collect or args.record)
@@ -399,6 +412,13 @@ def main():
     if args.no_hud and args.reuse:
         sys.exit("--no-hud cannot combine with --reuse; the game must reboot "
                  "to load the HUD-removal mod")
+
+    from aoe2hl import cadeui
+    cadeui.configure(args.cade, resolve_replay_path(args.row, args.search,
+                                                    args.touch))
+    if args.cade:
+        log(f"cade mode: CadeRemote control enabled "
+            f"(replay={cadeui.replay_path()})")
 
     if args.tag is None and args.row is None:
         sys.exit("need --row N (profile mode) or --tag T (arbitrary game "
@@ -500,7 +520,13 @@ def main():
 
 
 def start_replay(row, search):
-    """Load the replay through the UI; returns True on success."""
+    """Load the replay through CadeRemote (--cade) or the UI; True on success."""
+    from aoe2hl import cadeui
+    if cadeui.enabled():
+        path = cadeui.replay_path()
+        if path and cadeui.load_replay(path):
+            return True
+        log("WARNING: cade replay load failed; falling back to UI driving")
     return replays_ui.run(1, search)
 
 

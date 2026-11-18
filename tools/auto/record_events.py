@@ -19,6 +19,9 @@ Usage:
         [--segs 1,2] [--fps 30] [--max-minutes 40]
         [--no-hud]                      (record pass only; reboot required)
         [--overlay]                     (custom counts + terrain minimap)
+        [--cade]                        (drive replays via the game's built-in
+                                        CadeRemote gRPC API: load/pause/fog;
+                                        pyautogui fallback stays active)
         [--events PATH] [--plan PATH] [--out-dir PATH]
 """
 import sys

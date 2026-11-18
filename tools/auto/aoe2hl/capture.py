@@ -404,9 +404,16 @@ def fog_off():
 
     Fog is ON at every replay load. Detector: the minimap area goes dark
     under fog (calibrated: 73% dark pixels with fog vs 27% without).
-    Clicks the 'All Visible' checkbox only when needed. The measured
-    panel offsets are game-window-relative, so the window may sit on
-    any monitor."""
+    With CadeRemote mode (`--cade`) the built-in gRPC API sets it
+    directly; the click path stays as fallback. The measured panel
+    offsets are game-window-relative, so the window may sit on any
+    monitor."""
+    from aoe2hl import cadeui
+    if cadeui.enabled():
+        if cadeui.fog(False):
+            time.sleep(1.0)
+            return
+        log("cade fog RPC failed; falling back to the checkbox click")
     import cv2
     wr = game.window_rect()
     mm = game.crop_screen(wr["left"] + 1630, wr["top"] + 900,
