@@ -149,6 +149,13 @@ bar, score, command panel, chat, notifications) not drawn - world
       window-flip backtracking reaches ~27 kB of the full-state patch;
       full apiVersion-22 schema mining still OPEN (seed overrides in
       `docs/cade/schema_v22_overrides.json`; specs in `docs/cade/`).
+      Mining diagnosis (2026-11-18): in dense full-state dumps a wrong
+      scalar size drifts the stream for THOUSANDS of bytes before an
+      invalid action byte appears, so local backtracking (96-instruction
+      window + resume-at-choice) flips healthy instructions and thrashes;
+      next attack is repeated-structure alignment (the dump contains
+      thousands of identical blocks, e.g. 12-byte ResearchState records)
+      or extracting the true v22 schema.
 - [x] 13. Full-game archive + damage semantics pinned: `mp4_archive.xz`
       (30926 frames, t 0-6661 s, whole 22-min 8-player MP game, 67 MB
       xz) captured with the fixed resubscribe-on-deadline stream loop
