@@ -1,0 +1,12 @@
+{
+ "35:48": {
+  "name": "gameoptions_f48",
+  "kind": "value",
+  "ftype": "Float"
+ },
+ "36:19": {
+  "name": "playergameoptions_f19",
+  "kind": "value",
+  "ftype": "Int64"
+ }
+}

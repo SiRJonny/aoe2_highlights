@@ -419,6 +419,43 @@ Rewind status after the probe:
   same replay via RPC (~1-2 s), `SetGameSpeed(FASTEST)`, chase with the
   existing CONTROL-module seek to the exact target.
 
+## Frames-stream archive and state model (option B, in progress)
+
+Tooling built on top of the CadeRemote Frames stream:
+
+- `tools/auto/cade_record.py` — loads a replay via RPC, chases at a
+  chosen speed and archives the raw FrameSequence stream to
+  `<out>.xz` (length-prefixed messages) plus a `.meta.json` with time
+  samples and optional CONTROL-module ticks. Measured: ~26 MB xz per
+  wall-minute at FASTEST (~135 MB raw); the first sequence carries one
+  ~22 MB full-state patch.
+- `tools/auto/analyze_cade_frames.py` — frame/time/patch statistics.
+- `tools/auto/cade_apply.py` — applies an archive to an in-memory
+  state tree (`tools/auto/aoe2hl/cadestate.py`).
+- `cadestate` implements the LibreMatch delta format (14 stack
+  instructions) over a registry parsed from `docs/cade/model.rs`
+  (44 models, 960 fields after `extends` flattening; `r#type` fields
+  need special-casing). The 2021 model spec lags the live apiVersion 22
+  schema: appended fields and at least one changed scalar size
+  (PlayerGameOptions f19 is 8 bytes now). The miner infers unknown
+  field sizes by deep lookahead scoring (a 24-instruction structural
+  simulator) plus DFS backtracking with an undo log; it resolved the
+  first ~1.1 kB of the initial full-state patch before hitting a
+  known-field size drift it cannot see (no choice point exists for
+  registry-known fields). STATUS: works structurally; full v22 schema
+  mining is OPEN. Next steps: hand-seed overrides
+  (`docs/cade/schema_v22_overrides.json`, currently GameOptions f48 =
+  Float, PlayerGameOptions f19 = Int64) and iterate the failure-driven
+  widening, or extract the true schema from the binaries.
+
+Clock alignment (Frame.time vs CONTROL `GetGameTime`): Frame.time is
+MILLISECONDS and matches the HUD clock. Module `t` does NOT equal
+Frame.time/1000 for all replays - least-squares over aligned pairs gave
+`module_t = 1.06 * frame_s + 16` (SP replay) and `1.39 * frame_s + 9`
+(MP replay). The scale is per-match; derive it from a `--align` archive
+(`tools/auto/analyze_clock_align.py`) before mapping plan times onto
+archive times.
+
 
 ## Out-folder hygiene
 

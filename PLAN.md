@@ -133,16 +133,24 @@ bar, score, command panel, chat, notifications) not drawn - world
       deltas, time in ms, no reverse patches, streaming slows the sim.
       RestartAsReplay refused (status 9). Findings in
       `docs/replay-format-notes.md` ("CadeRemote" section).
-- [ ] 10. Recorder integration behind `--cade`: replace
-      replay-row UI driving with `LoadGame{LoadReplay}`, replace F3 /
-      speed settle with `Pause`/`SetGameSpeed`, add `SetFogOfWar`
-      (fog-off capture without the commandpanel workaround), optional
-      `SetPerspective` for per-player takes. Keep CONTROL module only
-      for the exact-time seek + event ticks. Smoke-validate one clip.
-- [ ] 11. Rewind option B: Frames-stream archive during chases; Python
-      patch applier + state model (spec: uncage model.rs/patcher.rs) to
-      reconstruct per-tick state for highlight detection and HUD data;
-      evaluate reverse playback via own renderer later.
+- [x] 10. Recorder integration behind `--cade` (LIVE VALIDATED both
+      passes): pass 1 collect via RPC replay load (full replay to
+      t=1542, module ticks + plan built); pass 2 record via RPC load +
+      RPC fog (clip minimap 19% dark = fog off, 412-frame clip muxed);
+      pyautogui fallbacks retained. Files: `aoe2hl/cadeui.py`,
+      recorder/capture/record_events changes.
+- [ ] 11. Rewind option B (in progress): `cade_record.py` archives the
+      Frames stream (~26 MB xz/wall-min at FASTEST) with module-clock
+      alignment; `analyze_cade_frames.py` + `analyze_clock_align.py`
+      done; `cadestate.py` delta applier + registry parser built and
+      working structurally, but full apiVersion-22 schema mining is
+      OPEN (2021 model spec lags: appended fields + changed scalar
+      sizes; DFS miner resolves the first ~1.1 kB of the full-state
+      patch, then hits a known-field drift). Seed overrides in
+      `docs/cade/schema_v22_overrides.json`; specs in `docs/cade/`.
+- [ ] 12. Later: per-player takes via `SetPerspective`; Oracle stream
+      (modal dismissal); ChangeScreen/ChangeWindowState/SetDesiredGame
+      probes; Frames-driven HUD data + highlight detection.
 
 
 ## Notes
